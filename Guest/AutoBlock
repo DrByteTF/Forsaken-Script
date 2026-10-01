@@ -1,0 +1,344 @@
+--[[
+    Guest1337 Auto Block — Clean Build
+    ============================================================
+    Three controls:
+    - Auto Block toggle
+    - Show Hitbox toggle
+    - Hitbox Color picker
+
+    Detection: hitbox overlap (FartSaken method)
+    Whitelist: blockable attack names (slash, stab, punch, etc.)
+]]
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris            = game:GetService("Debris")
+
+local LP = Players.LocalPlayer
+local PG = LP:WaitForChild("PlayerGui")
+
+-- ============================================================
+-- FOLDER REFERENCES
+-- ============================================================
+local function getMainUI() return PG:FindFirstChild("MainUI") end
+
+local function getKillersFolder()
+    local pf = workspace:FindFirstChild("Players")
+    return pf and pf:FindFirstChild("Killers")
+end
+
+local function getSurvivorsFolder()
+    local pf = workspace:FindFirstChild("Players")
+    return pf and pf:FindFirstChild("Survivors")
+end
+
+local function getHitboxesFolder()
+    return workspace:FindFirstChild("Hitboxes") or workspace
+end
+
+local function getRemote()
+    local ok, remote = pcall(function()
+        local Modules = ReplicatedStorage:WaitForChild("Modules", 5)
+        local Network = Modules and Modules:WaitForChild("Network", 5)
+        return Network and Network:WaitForChild("RemoteEvent", 5)
+    end)
+    return ok and remote or nil
+end
+
+local function getLocalChar() return LP.Character end
+
+-- ============================================================
+-- LOAD RAYFIELD
+-- ============================================================
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "Guest1337 Auto Block",
+    LoadingTitle = "Guest1337",
+    LoadingSubtitle = "Auto Block",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "Guest1337AB",
+        FileName = "Config",
+    },
+    Discord = { Enabled = false },
+    KeySystem = false,
+})
+
+-- ============================================================
+-- ⭐ BLOCKABLE ATTACK NAMES ⭐
+-- ============================================================
+-- Matches the original module's whitelist.
+-- Behead is intentionally excluded.
+local BlockableAttacks = {
+    ["slash"]        = true,
+    ["enragedslash"] = true,
+    ["stab"]         = true,
+    ["attack"]       = true,
+    ["punch"]        = true,
+    ["swing"]        = true,
+    ["golemslash"]   = true,
+}
+
+-- Custom hitbox for specific attacks
+local CustomHitboxes = {
+    ["golemslash"] = {
+        Size   = Vector3.new(6, 2, 7),
+        Offset = CFrame.new(0, 0, -5.5),
+    },
+}
+
+local DefaultSize    = Vector3.new(5, 5, 6)
+local DefaultOffset  = CFrame.new(0, 0, -3.5)
+local SizeMultiplier = 2.2
+local CheckLoops     = 12
+local CheckDelay     = 0.02
+local HitboxLife     = 0.4
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local Config = {
+    AutoBlock    = false,
+    ShowHitbox   = false,
+    HitboxColor  = Color3.new(0, 0, 0),
+}
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local State = {
+    watched = {},
+    hitboxesFolder = getHitboxesFolder(),
+    remote = nil,
+    autoImages = {},
+}
+
+task.spawn(function()
+    while true do
+        if not State.remote then State.remote = getRemote() end
+        task.wait(3)
+    end
+end)
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+local hasFiresignal = type(firesignal) == "function"
+
+local function fireBlock()
+    local main = getMainUI()
+    local cont = main and main:FindFirstChild("AbilityContainer")
+    local blockBtn = cont and cont:FindFirstChild("Block")
+
+    if hasFiresignal and blockBtn then
+        local ok = pcall(function()
+            firesignal(blockBtn.MouseButton1Click)
+        end)
+        if ok then return end
+    end
+
+    if State.remote then
+        pcall(function()
+            State.remote:FireServer("UseActorAbility", {"Block"})
+        end)
+    end
+end
+
+local function checkOverlap(part, targetHitbox)
+    local params = OverlapParams.new()
+    params.MaxParts = 1
+    params.FilterType = Enum.RaycastFilterType.Include
+    params.FilterDescendantsInstances = { targetHitbox }
+    return #workspace:GetPartsInPart(part, params) > 0
+end
+
+-- ============================================================
+-- GET ANIMATION NAME
+-- ============================================================
+-- Returns lowercase animation name (e.g. "slash", "stab")
+local function getAnimationName(Track)
+    if not Track or not Track.Animation then return nil end
+    local name = Track.Animation.Name
+    if name and name ~= "" then
+        return string.lower(name)
+    end
+    return nil
+end
+
+-- ============================================================
+-- HANDLE KILLER
+-- ============================================================
+local function handleKiller(Killer)
+    if not Killer:IsA("Model") then return end
+    if State.watched[Killer] then return end
+    State.watched[Killer] = true
+
+    local Humanoid = Killer:FindFirstChildOfClass("Humanoid")
+        or Killer:WaitForChild("Humanoid", 5)
+    local QueryHitbox = Killer:FindFirstChild("QueryHitbox")
+        or Killer:WaitForChild("QueryHitbox", 5)
+    if not Humanoid or not QueryHitbox then return end
+
+    local KillerAnimator = Humanoid:FindFirstChildOfClass("Animator")
+    if not KillerAnimator then return end
+
+    KillerAnimator.AnimationPlayed:Connect(function(Track)
+        if not Config.AutoBlock then return end
+        if not Players:GetPlayerFromCharacter(Killer) then return end
+
+        -- Whitelist check (matches original module's behavior)
+        local animName = getAnimationName(Track)
+        if not animName or not BlockableAttacks[animName] then return end
+
+        local myChar = getLocalChar()
+        if not myChar then return end
+        local myQH = myChar:FindFirstChild("QueryHitbox")
+        if not myQH then return end
+
+        local survivors = getSurvivorsFolder()
+        if survivors and myChar.Parent ~= survivors then return end
+
+        local main = getMainUI()
+        local cont = main and main:FindFirstChild("AbilityContainer")
+        if not cont or not cont:FindFirstChild("Block") then return end
+
+        -- Custom hitbox or default
+        local custom = CustomHitboxes[animName] or CustomHitboxes[string.lower(Killer.Name)]
+        local size   = (custom and custom.Size or DefaultSize) * SizeMultiplier
+        local offset = custom and custom.Offset or DefaultOffset
+
+        for i = 1, CheckLoops do
+            if not Config.AutoBlock then break end
+            if not myChar.Parent then break end
+            if not QueryHitbox.Parent then break end
+
+            local Part = Instance.new("Part")
+            Part.Name         = "KillerDetectHitbox"
+            Part.Color        = Config.HitboxColor
+            Part.Size         = size
+            Part.CFrame       = QueryHitbox.CFrame * offset
+            Part.CanCollide   = false
+            Part.Anchored     = true
+            Part.CastShadow   = false
+            Part.Material     = Enum.Material.ForceField
+            Part.Transparency = Config.ShowHitbox and 0.1 or 1
+            Part.Parent       = State.hitboxesFolder
+            Debris:AddItem(Part, HitboxLife)
+
+            if checkOverlap(Part, myQH) then
+                fireBlock()
+                break
+            end
+
+            task.wait(CheckDelay)
+        end
+    end)
+end
+
+-- ============================================================
+-- SETUP KILLER WATCHERS
+-- ============================================================
+local function setupKillers()
+    local KF = getKillersFolder()
+    if not KF then
+        task.spawn(function()
+            while not getKillersFolder() do task.wait(1) end
+            setupKillers()
+        end)
+        return
+    end
+
+    for _, k in ipairs(KF:GetChildren()) do
+        handleKiller(k)
+    end
+    KF.ChildAdded:Connect(handleKiller)
+end
+
+setupKillers()
+
+-- ============================================================
+-- AUTO IMAGE INDICATOR
+-- ============================================================
+local function setupAutoImage()
+    local main = getMainUI()
+    if not main then return end
+    local cont = main:FindFirstChild("AbilityContainer")
+    if not cont then return end
+
+    local blockBtn = cont:FindFirstChild("Block")
+    if not blockBtn then return end
+    if blockBtn:FindFirstChild("AutoImage") then return end
+
+    local AutoImage = Instance.new("ImageLabel")
+    AutoImage.Name = "AutoImage"
+    AutoImage.Interactable = false
+    AutoImage.Parent = blockBtn
+    AutoImage.Image = "rbxassetid://114159864966636"
+    AutoImage.BackgroundTransparency = 1
+    AutoImage.Size = UDim2.fromScale(0.8, 0.8)
+    AutoImage.Position = UDim2.fromScale(0.5, 0)
+    AutoImage.AnchorPoint = Vector2.new(0.5, 0.4)
+    AutoImage.Visible = Config.AutoBlock
+
+    State.autoImages[blockBtn] = AutoImage
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        setupAutoImage()
+    end
+end)
+
+local function updateAutoImageVisibility()
+    for _, img in pairs(State.autoImages) do
+        if img and img.Parent then
+            img.Visible = Config.AutoBlock
+        end
+    end
+end
+
+-- ============================================================
+-- UI — 3 controls only
+-- ============================================================
+local MainTab = Window:CreateTab("Auto Block", 4483362458)
+
+MainTab:CreateSection("Auto Block")
+
+MainTab:CreateToggle({
+    Name = "Auto Block",
+    CurrentValue = false,
+    Flag = "AutoBlock",
+    Callback = function(v)
+        Config.AutoBlock = v
+        updateAutoImageVisibility()
+    end,
+})
+
+MainTab:CreateSection("Hitbox")
+
+MainTab:CreateToggle({
+    Name = "Show Hitbox",
+    CurrentValue = false,
+    Flag = "ShowHitbox",
+    Callback = function(v) Config.ShowHitbox = v end,
+})
+
+MainTab:CreateColorPicker({
+    Name = "Hitbox Color",
+    Color = Color3.new(0, 0, 0),
+    Flag = "HitboxColor",
+    Callback = function(v) Config.HitboxColor = v end,
+})
+
+-- ============================================================
+-- INIT
+-- ============================================================
+Rayfield:LoadConfiguration()
+setupAutoImage()
+
+print("[Guest1337 AB] Loaded — RightShift toggles UI")
