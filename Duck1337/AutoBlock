@@ -1,0 +1,115 @@
+local OrionLib = loadstring(game:HttpGet(('https://raw.githubusercontent.com/jensonhirst/Orion/main/source')))()
+local Window = OrionLib:MakeWindow({Name = "DuckBlock", HidePremium = false, SaveConfig = true, ConfigFolder = "Guest1337AutoBlock"})
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local localPlayer = Players.LocalPlayer
+
+local toggleOn = false
+local detectionRange = 18
+local clickedTracks = {}
+
+local animationIds = {
+    ["94317217837143"] = true, ["105840448036441"] = true, ["99215225043220"] = true, ["108907358619313"] = true,
+    ["107444859834748"] = true, ["124903763333174"] = true, ["123835423223220"] = true, ["112809109188560"] = true,
+    ["123923371062204"] = true, ["137809737339569"] = true, ["131123355704017"] = true, ["98675142200448"] = true,
+    ["109246041199659"] = true, ["140242176732868"] = true, ["105204810054381"] = true, ["80516583309685"] = true,
+    ["128195973631079"] = true, ["84307400688050"] = true, ["98733709078792"] = true, ["124234993291213"] = true,
+    ["82221759983649"] = true, ["75330693422988"] = true, ["117173212095661"] = true, ["74809026448465"] = true,
+    ["119942598489800"] = true, ["88589682639517"] = true, ["121954639447247"] = true, ["128856426573270"] = true,
+    ["85853080745515"] = true, ["109348678063422"] = true, ["80540530406270"] = true, ["131406927389838"] = true,
+    ["128367348686124"] = true, ["89004992452376"] = true, ["108610718831698"] = true, ["109570290393196"] = true,
+    ["96594507550917"] = true, ["125213046326879"] = true, ["79980897195554"] = true, ["93299090238530"] = true,
+    ["138547840635558"] = true, ["119664480754070"] = true, ["104910828105172"] = true, ["116581754553533"] = true,
+    ["92869747208256"] = true, ["114742322778642"] = true, ["70739368096233"] = true, ["96117920303138"] = true,
+    ["135319730390518"] = true, ["98742773509325"] = true, ["74842815979546"] = true, ["127557531826290"] = true,
+    ["108651070773439"] = true, ["105516183226360"] = true, ["113413858159336"] = true, ["105658601731267"] = true,
+    ["84116622032112"] = true, ["73662192846371"] = true, ["133709029886490"] = true, ["79612713897495"] = true,
+    ["94632255644411"] = true, ["71805956520207"] = true, ["139996647355899"] = true, ["77649238882198"] = true,
+    ["115678417928765"] = true, ["119583605486352"] = true, ["118562842802948"] = true, ["132581672170205"] = true,
+}
+
+local function clickBlockButton()
+    local gui = localPlayer:FindFirstChild("PlayerGui")
+    if not gui then return end
+    local mainUI = gui:FindFirstChild("MainUI")
+    local container = mainUI and mainUI:FindFirstChild("AbilityContainer")
+    local blockButton = container and container:FindFirstChild("Block")
+    if blockButton and blockButton:IsA("ImageButton") and blockButton.Visible then
+        for _, conn in ipairs(getconnections(blockButton.MouseButton1Click)) do
+            pcall(function() conn:Fire() end)
+        end
+        pcall(function() blockButton:Activate() end)
+    end
+end
+
+local function autoPunch(targetRoot)
+    local char = localPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if hrp and targetRoot then
+        hrp.CFrame = CFrame.new(hrp.Position, targetRoot.Position)
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then
+            tool:Activate()
+        end
+    end
+end
+
+local MainTab = Window:MakeTab({
+	Name = "Duck1337",
+	Icon = "rbxassetid://125023025975938",
+	PremiumOnly = false
+})
+
+MainTab:AddToggle({
+	Name = "Auto Block + Punch",
+	Default = false,
+	Callback = function(Value)
+		toggleOn = Value
+	end    
+})
+
+MainTab:AddTextbox({
+	Name = "Detection Range",
+	Default = tostring(detectionRange),
+	TextDisappear = false,
+	Callback = function(Value)
+        local num = tonumber(Value)
+        if num then
+            detectionRange = math.clamp(num,5,50)
+        end
+	end	  
+})
+
+RunService.Heartbeat:Connect(function()
+    if not toggleOn then return end
+    local myChar = localPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= localPlayer and otherPlayer.Character then
+            local root = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if root and humanoid and humanoid.Health > 0 then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist <= detectionRange then
+                    for _, track in ipairs(humanoid:GetPlayingAnimationTracks()) do
+                        local anim = track.Animation
+                        local id = anim and anim.AnimationId and string.match(anim.AnimationId, "%d+")
+                        if id and animationIds[id] and not clickedTracks[track] then
+                            clickedTracks[track] = true
+                            clickBlockButton()
+                            autoPunch(root)
+                            task.spawn(function()
+                                track.Stopped:Wait()
+                                clickedTracks[track] = nil
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+OrionLib:Init()
