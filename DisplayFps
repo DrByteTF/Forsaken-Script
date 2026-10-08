@@ -1,0 +1,99 @@
+--[[
+    Simple FPS Counter
+    Shows your current FPS on screen with color-coded performance.
+]]
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- CONFIG
+-- ==========================================
+local CONFIG = {
+    Position = UDim2.new(0, 10, 0, 10),  -- Top-left corner
+    Font = Enum.Font.GothamBold,
+    TextSize = 18,
+    Background = Color3.fromRGB(0, 0, 0),
+    Transparency = 0.5,
+    -- Color thresholds
+    ColorGood = Color3.fromRGB(0, 255, 0),     -- FPS >= 50
+    ColorOkay = Color3.fromRGB(255, 200, 0),   -- FPS 30-49
+    ColorBad  = Color3.fromRGB(255, 50, 50),   -- FPS < 30
+}
+
+-- ==========================================
+-- CREATE GUI
+-- ==========================================
+local parent = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
+
+-- Clean up old instance if re-running
+local old = parent:FindFirstChild("SimpleFPSCounter")
+if old then old:Destroy() end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SimpleFPSCounter"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 9999
+ScreenGui.Parent = parent
+
+local Frame = Instance.new("Frame")
+Frame.Name = "Container"
+Frame.Size = UDim2.new(0, 110, 0, 36)
+Frame.Position = CONFIG.Position
+Frame.BackgroundColor3 = CONFIG.Background
+Frame.BackgroundTransparency = CONFIG.Transparency
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true  -- You can drag it around
+Frame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = Frame
+
+local Label = Instance.new("TextLabel")
+Label.Name = "FPSLabel"
+Label.Size = UDim2.new(1, -10, 1, -10)
+Label.Position = UDim2.new(0, 5, 0, 5)
+Label.BackgroundTransparency = 1
+Label.Text = "FPS: --"
+Label.TextColor3 = CONFIG.ColorGood
+Label.Font = CONFIG.Font
+Label.TextSize = CONFIG.TextSize
+Label.TextScaled = false
+Label.Parent = Frame
+
+-- ==========================================
+-- FPS CALCULATION
+-- ==========================================
+local frameCount = 0
+local lastUpdate = tick()
+
+RunService.RenderStepped:Connect(function()
+    frameCount = frameCount + 1
+    local now = tick()
+    local elapsed = now - lastUpdate
+
+    if elapsed >= 0.5 then  -- Update every 0.5 seconds
+        local fps = math.floor(frameCount / elapsed)
+        frameCount = 0
+        lastUpdate = now
+
+        -- Set text
+        Label.Text = "FPS: " .. fps
+
+        -- Color based on FPS
+        if fps >= 50 then
+            Label.TextColor3 = CONFIG.ColorGood
+        elseif fps >= 30 then
+            Label.TextColor3 = CONFIG.ColorOkay
+        else
+            Label.TextColor3 = CONFIG.ColorBad
+        end
+    end
+end)
+
+print("[FPS Counter] Loaded. Drag the label anywhere on screen.")
