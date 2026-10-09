@@ -1,0 +1,169 @@
+--[[
+    Shedletsky Aimbot — WindUI
+    Auto Slash with prediction and facing check.
+    WARNING: Violates Roblox ToS. Use at your own risk.
+]]
+
+-- ==========================================
+-- Load WindUI
+-- ==========================================
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- ==========================================
+-- Services
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Remote
+local RemoteEvent
+pcall(function()
+    RemoteEvent = ReplicatedStorage:WaitForChild("Modules", 10)
+        :WaitForChild("Network", 10)
+        :WaitForChild("Network", 10)
+        :WaitForChild("RemoteEvent", 10)
+end)
+
+-- ==========================================
+-- Config
+-- ==========================================
+local Config = {
+    AutoSlash = true,
+    MaxRange = 12,
+    Prediction = 0.15,
+    FacingThreshold = 0.5,
+    AutoSlashCooldown = 0.4,
+}
+
+local lastSlashTime = 0
+
+-- ==========================================
+-- Helpers
+-- ==========================================
+local function getKillersFolder()
+    local p = workspace:FindFirstChild("Players")
+    return p and p:FindFirstChild("Killers")
+end
+
+local function fireSlash()
+    if not RemoteEvent then return end
+    local buf = buffer.fromstring("\3\5\0\0\0Slash")
+    pcall(function()
+        RemoteEvent:FireServer("UseActorAbility", {[1] = buf})
+    end)
+end
+
+local function getNearestKiller()
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local kf = getKillersFolder()
+    if not kf then return nil end
+
+    local nearest, nearestDist = nil, Config.MaxRange
+    for _, killer in ipairs(kf:GetChildren()) do
+        local kRoot = killer:FindFirstChild("HumanoidRootPart")
+        if kRoot then
+            local dist = (kRoot.Position - myRoot.Position).Magnitude
+            if dist < nearestDist then
+                nearestDist = dist
+                nearest = kRoot
+            end
+        end
+    end
+    return nearest
+end
+
+-- ==========================================
+-- Main Loop
+-- ==========================================
+RunService.RenderStepped:Connect(function()
+    if not Config.AutoSlash then return end
+    if tick() - lastSlashTime < Config.AutoSlashCooldown then return end
+
+    local myChar = LocalPlayer.Character
+    if not myChar then return end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    local target = getNearestKiller()
+    if not target then return end
+
+    -- Predict target position
+    local vel = target.AssemblyLinearVelocity
+    local predictedPos = target.Position + (vel * Config.Prediction)
+
+    -- Facing check
+    local dir = (predictedPos - myRoot.Position)
+    if dir.Magnitude > 0.1 then
+        dir = dir.Unit
+        local facing = myRoot.CFrame.LookVector
+        local dot = facing:Dot(dir)
+        if dot >= Config.FacingThreshold then
+            fireSlash()
+            lastSlashTime = tick()
+        end
+    end
+end)
+
+-- ==========================================
+-- WINDUI
+-- ==========================================
+local Window = WindUI:CreateWindow({
+    Title = "Shedletsky",
+    Icon = "sword",
+    Author = "By Xuzi",
+    Folder = "ShedAimbot",
+    Size = UDim2.fromOffset(450, 400),
+    Transparent = true,
+    Theme = "Dark",
+    SideBarWidth = 140,
+    HideSearchBar = true,
+    ScrollBarEnabled = false,
+})
+
+local MainTab = Window:Tab({ Title = "Aimbot", Icon = "crosshair" })
+local Sec = MainTab:Section({ Title = "Shedletsky", Opened = true })
+
+Sec:Toggle({
+    Title = "Auto Slash",
+    Desc = "Automatically slash when a killer is in range",
+    Default = Config.AutoSlash,
+    Callback = function(v) Config.AutoSlash = v end,
+})
+
+Sec:Slider({
+    Title = "Max Range",
+    Step = 1,
+    Value = { Min = 5, Max = 25, Default = Config.MaxRange },
+    Callback = function(v) Config.MaxRange = v end,
+})
+
+Sec:Slider({
+    Title = "Prediction Factor",
+    Desc = "Higher = aims further ahead. Tune for your ping.",
+    Step = 0.01,
+    Value = { Min = 0, Max = 0.5, Default = Config.Prediction },
+    Callback = function(v) Config.Prediction = v end,
+})
+
+Sec:Slider({
+    Title = "Facing Threshold",
+    Desc = "0.5 = 90° arc, 0.9 = narrow",
+    Step = 0.05,
+    Value = { Min = 0, Max = 1, Default = Config.FacingThreshold },
+    Callback = function(v) Config.FacingThreshold = v end,
+})
+
+Sec:Slider({
+    Title = "Slash Cooldown (s)",
+    Step = 0.05,
+    Value = { Min = 0.1, Max = 2, Default = Config.AutoSlashCooldown },
+    Callback = function(v) Config.AutoSlashCooldown = v end,
+})
+
+print("[Shedletsky Aimbot] Loaded.")
