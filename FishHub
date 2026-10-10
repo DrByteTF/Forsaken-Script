@@ -1057,4 +1057,170 @@ SetSection:Button({
     end,
 })
 
+-- ==========================================
+-- Config Save/Load System
+-- ==========================================
+local CONFIG_FOLDER = "FishHub_Configs"
+local selectedConfig = nil
+
+-- Ensure folder exists
+if makefolder and not isfolder(CONFIG_FOLDER) then
+    pcall(function() makefolder(CONFIG_FOLDER) end)
+end
+
+-- Function: save current settings to a file
+local function saveConfig(name)
+    if not name or name == "" then return false, "No name given" end
+    local safeName = name:gsub("[^%w_%-]", "_")  -- strip weird chars
+    local data = {}
+    for k, v in pairs(Settings) do
+        if type(v) ~= "table" and type(v) ~= "userdata" then
+            data[k] = v
+        end
+    end
+    local ok, err = pcall(function()
+        writefile(CONFIG_FOLDER .. "/" .. safeName .. ".json", HttpService:JSONEncode(data))
+    end)
+    return ok, err
+end
+
+-- Function: load settings from a file
+local function loadConfig(name)
+    if not name or name == "" then return false, "No name given" end
+    local safeName = name:gsub("[^%w_%-]", "_")
+    local path = CONFIG_FOLDER .. "/" .. safeName .. ".json"
+    if not isfile(path) then return false, "Config not found" end
+    local ok, result = pcall(function()
+        return HttpService:JSONDecode(readfile(path))
+    end)
+    if not ok or type(result) ~= "table" then return false, "Invalid config" end
+    for k, v in pairs(result) do
+        if Settings[k] ~= nil then
+            Settings[k] = v
+        end
+    end
+    return true
+end
+
+-- Function: delete a config
+local function deleteConfig(name)
+    if not name or name == "" then return false end
+    local safeName = name:gsub("[^%w_%-]", "_")
+    local path = CONFIG_FOLDER .. "/" .. safeName .. ".json"
+    if isfile(path) then
+        pcall(function() delfile(path) end)
+        return true
+    end
+    return false
+end
+
+-- Function: list all saved configs
+local function listConfigs()
+    local list = {}
+    if not listfiles then return list end
+    local ok, files = pcall(function() return listfiles(CONFIG_FOLDER) end)
+    if not ok or not files then return list end
+    for _, file in ipairs(files) do
+        local name = file:match("([^/\\]+)%.json$")
+        if name then table.insert(list, name) end
+    end
+    return list
+end
+
+-- Config Section UI
+local ConfigSection = SettingsTab:Section({ Title = "Config Manager", Opened = true })
+
+-- Config name input
+local configNameInput = ""
+ConfigSection:Input({
+    Title = "Config Name",
+    Desc = "Enter a name to save current settings",
+    Placeholder = "My Config",
+    Value = "",
+    Callback = function(text)
+        configNameInput = text
+    end,
+})
+
+-- Save button
+ConfigSection:Button({
+    Title = "💾 Save Current Settings",
+    Desc = "Saves all current settings to a config file",
+    Callback = function()
+        if configNameInput == "" then
+            print("[Config] Please enter a config name first!")
+            return
+        end
+        local ok, err = saveConfig(configNameInput)
+        if ok then
+            print("[Config] Saved: " .. configNameInput)
+        else
+            warn("[Config] Save failed: " .. tostring(err))
+        end
+    end,
+})
+
+-- Dropdown to select config
+local configDropdown
+configDropdown = ConfigSection:Dropdown({
+    Title = "Select Config",
+    Desc = "Pick a saved config to load or delete",
+    Values = listConfigs(),
+    Value = nil,
+    Multi = false,
+    Callback = function(selected)
+        selectedConfig = selected
+    end,
+})
+
+-- Load button
+ConfigSection:Button({
+    Title = "📂 Load Selected Config",
+    Desc = "Applies the settings from the selected config",
+    Callback = function()
+        if not selectedConfig or selectedConfig == "" then
+            print("[Config] Please select a config from the dropdown first!")
+            return
+        end
+        local ok, err = loadConfig(selectedConfig)
+        if ok then
+            print("[Config] Loaded: " .. selectedConfig .. " — rejoin or re-open UI to apply")
+        else
+            warn("[Config] Load failed: " .. tostring(err))
+        end
+    end,
+})
+
+-- Delete button
+ConfigSection:Button({
+    Title = "🗑️ Delete Selected Config",
+    Desc = "Permanently removes the selected config file",
+    Callback = function()
+        if not selectedConfig or selectedConfig == "" then
+            print("[Config] Please select a config first!")
+            return
+        end
+        local ok = deleteConfig(selectedConfig)
+        if ok then
+            print("[Config] Deleted: " .. selectedConfig)
+            selectedConfig = nil
+        else
+            warn("[Config] Delete failed")
+        end
+    end,
+})
+
+-- Refresh dropdown button
+ConfigSection:Button({
+    Title = "🔄 Refresh Config List",
+    Desc = "Updates the dropdown with the latest saved configs",
+    Callback = function()
+        local updated = listConfigs()
+        pcall(function()
+            configDropdown:Refresh(updated, true)
+        end)
+        print("[Config] List refreshed. Found " .. #updated .. " config(s).")
+    end,
+})
+
 print("Fish Hub (WindUI) loaded.")
