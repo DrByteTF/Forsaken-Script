@@ -1047,7 +1047,7 @@ SetSection:Button({
     Desc = "Click to run the FPS counter script",
     Callback = function()
         local success, err = pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/DrByteTF/Forsaken-Script/refs/heads/main/DisplayFps"))()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/DrByteTF/Universal-Script/refs/heads/main/DisplayFps"))()
         end)
         if success then
             print("[Loader] FPS script executed successfully.")
