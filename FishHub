@@ -771,8 +771,8 @@ local SettingsTab = Window:Tab({ Title = "Settings",      Icon = "settings" })
 -- ==========================================
 local InfoSection = InfoTab:Section({ Title = "About", Opened = true })
 InfoSection:Paragraph({
-    Title = "Duck Hub Auto Block",
-    Desc = "Developed by @By_Xuzi\n🟢 Working well\n🔴 Errors, fixing\n🟡 Fair / Usable\n\nAuto Block 🟢 — All sound IDs included\nPunch Aimbot 🟢\nAuto Solver 🟢\nStamina Setting 🟢\nSave Config 🟢",
+    Title = "Fish Hub",
+    Desc = "Developed by @By_ᴹìɮì\n🟢 Working well\n🔴 Errors, fixing\n🟡 Fair / Usable\n\nAuto Block 🟢 — All sound IDs included\nPunch Aimbot 🟢\nAuto Solver 🟢\nStamina Setting 🟢\nSave Config 🟢",
 })
 
 -- ==========================================
@@ -1040,6 +1040,21 @@ local SetSection = SettingsTab:Section({ Title = "UI", Opened = true })
 SetSection:Button({
     Title = "Close UI",
     Callback = function() Window:Destroy() end,
+})
+
+SetSection:Button({
+    Title = "FPS Display (TOP LEFT CORNER + DRAGGABLE GUI)",
+    Desc = "Click to run the FPS counter script",
+    Callback = function()
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/DrByteTF/Forsaken-Script/refs/heads/main/DisplayFps"))()
+        end)
+        if success then
+            print("[Loader] FPS script executed successfully.")
+        else
+            warn("[Loader] Failed to execute FPS script: " .. tostring(err))
+        end
+    end,
 })
 
 print("Fish Hub (WindUI) loaded.")
