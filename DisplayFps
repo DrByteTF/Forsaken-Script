@@ -7,9 +7,9 @@ local LocalPlayer = Players.LocalPlayer
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-   Name = "DoggiSaken",
+   Name = "PigSaken",
    LoadingTitle = "Loading...",
-   LoadingSubtitle = "mTy lazy💔",
+   LoadingSubtitle = "Oink Oink",
    ToggleUIKeybind = "K",
    KeySystem = false,
 })
