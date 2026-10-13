@@ -1,99 +1,454 @@
---[[
-    Simple FPS Counter
-    Shows your current FPS on screen with color-coded performance.
-]]
-
-local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
 local LocalPlayer = Players.LocalPlayer
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
--- ==========================================
--- CONFIG
--- ==========================================
-local CONFIG = {
-    Position = UDim2.new(0, 10, 0, 10),  -- Top-left corner
-    Font = Enum.Font.GothamBold,
-    TextSize = 18,
-    Background = Color3.fromRGB(0, 0, 0),
-    Transparency = 0.5,
-    -- Color thresholds
-    ColorGood = Color3.fromRGB(0, 255, 0),     -- FPS >= 50
-    ColorOkay = Color3.fromRGB(255, 200, 0),   -- FPS 30-49
-    ColorBad  = Color3.fromRGB(255, 50, 50),   -- FPS < 30
-}
+local Window = Rayfield:CreateWindow({
+   Name = "DoggiSaken",
+   LoadingTitle = "Loading...",
+   LoadingSubtitle = "mTy lazy💔",
+   ToggleUIKeybind = "K",
+   KeySystem = false,
+})
 
--- ==========================================
--- CREATE GUI
--- ==========================================
-local parent = gethui and gethui() or LocalPlayer:WaitForChild("PlayerGui")
+local Main = Window:CreateTab("Main")
+local ESPTab = Window:CreateTab("ESP")
+local Combat = Window:CreateTab("Combat")
 
--- Clean up old instance if re-running
-local old = parent:FindFirstChild("SimpleFPSCounter")
-if old then old:Destroy() end
+local autoGenEnabled = false
+local autoGenCooldown = 4
+local infStaminaEnabled = false
+local visualStaminaEnabled = false
+local detectionRange = 20
+local toggleOn, autoPunchOn = false, false
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "SimpleFPSCounter"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.DisplayOrder = 9999
-ScreenGui.Parent = parent
+Main:CreateSection("Generator")
 
-local Frame = Instance.new("Frame")
-Frame.Name = "Container"
-Frame.Size = UDim2.new(0, 110, 0, 36)
-Frame.Position = CONFIG.Position
-Frame.BackgroundColor3 = CONFIG.Background
-Frame.BackgroundTransparency = CONFIG.Transparency
-Frame.BorderSizePixel = 0
-Frame.Active = true
-Frame.Draggable = true  -- You can drag it around
-Frame.Parent = ScreenGui
+Main:CreateToggle({
+    Name = "Auto Generator",
+    CurrentValue = false,
+    Callback = function(v)
+        autoGenEnabled = v
+    end
+})
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = Frame
+Main:CreateSlider({
+    Name = "Cooldown",
+    Range = {1, 15},
+    Increment = 0.5,
+    Suffix = "s",
+    CurrentValue = autoGenCooldown,
+    Callback = function(v)
+        autoGenCooldown = v
+    end
+})
 
-local Label = Instance.new("TextLabel")
-Label.Name = "FPSLabel"
-Label.Size = UDim2.new(1, -10, 1, -10)
-Label.Position = UDim2.new(0, 5, 0, 5)
-Label.BackgroundTransparency = 1
-Label.Text = "FPS: --"
-Label.TextColor3 = CONFIG.ColorGood
-Label.Font = CONFIG.Font
-Label.TextSize = CONFIG.TextSize
-Label.TextScaled = false
-Label.Parent = Frame
+Main:CreateSection("Player")
+local SprintingModule = require(
+    ReplicatedStorage
+        :WaitForChild("Systems")
+        :WaitForChild("Character")
+        :WaitForChild("Game")
+        :WaitForChild("Sprinting")
+)
 
--- ==========================================
--- FPS CALCULATION
--- ==========================================
-local frameCount = 0
-local lastUpdate = tick()
+local defaultLoss = SprintingModule.StaminaLoss
+local defaultGain = SprintingModule.StaminaGain
 
-RunService.RenderStepped:Connect(function()
-    frameCount = frameCount + 1
-    local now = tick()
-    local elapsed = now - lastUpdate
+local function applyStamina()
+    if infStaminaEnabled then
+        SprintingModule.StaminaLoss = 0
+        SprintingModule.StaminaGain = 9999
+    else
+        SprintingModule.StaminaLoss = defaultLoss
+        SprintingModule.StaminaGain = defaultGain
+    end
+end
 
-    if elapsed >= 0.5 then  -- Update every 0.5 seconds
-        local fps = math.floor(frameCount / elapsed)
-        frameCount = 0
-        lastUpdate = now
+Main:CreateToggle({
+    Name = "Inf Stamina",
+    CurrentValue = false,
+    Callback = function(v)
+        infStaminaEnabled = v
+        applyStamina()
+    end
+})
 
-        -- Set text
-        Label.Text = "FPS: " .. fps
+local connection
 
-        -- Color based on FPS
-        if fps >= 50 then
-            Label.TextColor3 = CONFIG.ColorGood
-        elseif fps >= 30 then
-            Label.TextColor3 = CONFIG.ColorOkay
-        else
-            Label.TextColor3 = CONFIG.ColorBad
+local function getModule()
+    local sprinting = ReplicatedStorage
+        :WaitForChild("Systems")
+        :WaitForChild("Character")
+        :WaitForChild("Game")
+        :WaitForChild("Sprinting")
+
+    return require(sprinting)
+end
+
+local function createDisplay()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+
+    local head = character:WaitForChild("Head")
+
+    pcall(function()
+        head:FindFirstChild("StaminaDisplay"):Destroy()
+    end)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "StaminaDisplay"
+    billboard.Size = UDim2.new(3, 0, 1, 0)
+    billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.Enabled = visualStaminaEnabled
+    billboard.Parent = head
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextSize = 12 
+    textLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    textLabel.TextStrokeTransparency = 0.4
+    textLabel.Text = "Stamina"
+    textLabel.Parent = billboard
+
+    return textLabel
+end
+
+local function updateDisplay(textLabel)
+    local module = getModule()
+
+    local current = math.floor(module.Stamina or 0)
+    local maxStam = module.MaxStamina or 100
+
+    textLabel.Text = "Stamina " .. current .. "/" .. maxStam
+end
+
+local function setupCharacter()
+    local textLabel = createDisplay()
+    if not textLabel then return end
+
+    if connection then connection:Disconnect() end
+
+    connection = RunService.RenderStepped:Connect(function()
+        if visualStaminaEnabled then
+            pcall(updateDisplay, textLabel)
+        end
+    end)
+end
+
+Main:CreateToggle({
+    Name = "Visual Stamina",
+    CurrentValue = false,
+    Callback = function(v)
+        visualStaminaEnabled = v
+
+        local char = LocalPlayer.Character
+        if char then
+            local head = char:FindFirstChild("Head")
+            if head and head:FindFirstChild("StaminaDisplay") then
+                head.StaminaDisplay.Enabled = v
+            end
+        end
+    end
+})
+
+applyStamina()
+
+if LocalPlayer.Character then
+    task.wait(1)
+    setupCharacter()
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    applyStamina()
+    setupCharacter()
+end)
+
+task.spawn(function()
+    local lastFire = 0
+
+    while task.wait(0.1) do
+        if autoGenEnabled and tick() - lastFire >= autoGenCooldown then
+            pcall(function()
+                local mapFolder = Workspace:FindFirstChild("Map")
+                    and Workspace.Map:FindFirstChild("Ingame")
+                    and Workspace.Map.Ingame:FindFirstChild("Map")
+
+                if not mapFolder then return end
+
+                for _, gen in pairs(mapFolder:GetChildren()) do
+                    if gen.Name == "Generator"
+                        and gen:FindFirstChild("Remotes")
+                        and gen.Remotes:FindFirstChild("RE") then
+
+                        gen.Remotes.RE:FireServer()
+                    end
+                end
+            end)
+
+            lastFire = tick()
         end
     end
 end)
 
-print("[FPS Counter] Loaded. Drag the label anywhere on screen.")
+local ESPState = {
+    Killers = false,
+    Survivors = false,
+    Generators = false,
+    Items = false
+}
+
+ESPTab:CreateSection("Text ESP")
+
+ESPTab:CreateToggle({ Name = "Killers ESP", Callback = function(v) ESPState.Killers = v end })
+ESPTab:CreateToggle({ Name = "Survivors ESP", Callback = function(v) ESPState.Survivors = v end })
+ESPTab:CreateToggle({ Name = "Generators ESP", Callback = function(v) ESPState.Generators = v end })
+ESPTab:CreateToggle({ Name = "Items ESP", Callback = function(v) ESPState.Items = v end })
+
+local killersFolder = Workspace:WaitForChild("Players"):WaitForChild("Killers")
+local survivorsFolder = Workspace:WaitForChild("Players"):WaitForChild("Survivors")
+local itemsFolder = Workspace:FindFirstChild("Items")
+
+local function getMapFolder()
+    local map = Workspace:FindFirstChild("Map")
+    if map and map:FindFirstChild("Ingame") then
+        return map.Ingame:FindFirstChild("Map")
+    end
+end
+
+local function createESP(obj, color)
+    if obj:FindFirstChild("ESP_Tag") then return end
+
+    local adornee = obj:FindFirstChild("Head")
+        or obj:FindFirstChild("HumanoidRootPart")
+        or obj:FindFirstChildWhichIsA("BasePart")
+
+    if not adornee then return end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ESP_Tag"
+    bb.Adornee = adornee
+    bb.Size = UDim2.new(0, 90, 0, 18)
+    bb.StudsOffset = Vector3.new(0, 2, 0)
+    bb.AlwaysOnTop = true
+    bb.Enabled = false
+    bb.Parent = obj
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.TextSize = 9
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0.5
+    label.TextColor3 = color
+    label.Text = obj.Name
+    label.Parent = bb
+end
+
+task.spawn(function()
+    while task.wait(1.5) do
+
+        if ESPState.Killers then
+            for _, k in pairs(killersFolder:GetChildren()) do
+                if k:IsA("Model") then
+                    createESP(k, Color3.fromRGB(255, 0, 0))
+                end
+            end
+        end
+
+        if ESPState.Survivors then
+            for _, s in pairs(survivorsFolder:GetChildren()) do
+                if s:IsA("Model") then
+                    createESP(s, Color3.fromRGB(0, 170, 255))
+                end
+            end
+        end
+
+        if ESPState.Generators then
+            local mapFolder = getMapFolder()
+            if mapFolder then
+                for _, gen in pairs(mapFolder:GetChildren()) do
+                    if gen.Name == "Generator" then
+                        createESP(gen, Color3.fromRGB(170, 0, 255))
+                    end
+                end
+            end
+        end
+
+        if ESPState.Items and itemsFolder then
+            for _, item in pairs(itemsFolder:GetChildren()) do
+                createESP(item, Color3.fromRGB(0, 170, 255))
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+
+    for _, obj in pairs(killersFolder:GetChildren()) do
+        local bb = obj:FindFirstChild("ESP_Tag")
+        if bb then bb.Enabled = ESPState.Killers end
+    end
+
+    for _, obj in pairs(survivorsFolder:GetChildren()) do
+        local bb = obj:FindFirstChild("ESP_Tag")
+        if bb then bb.Enabled = ESPState.Survivors end
+    end
+
+    local mapFolder = getMapFolder()
+    if mapFolder then
+        for _, gen in pairs(mapFolder:GetChildren()) do
+            local bb = gen:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Generators end
+        end
+    end
+
+    if itemsFolder then
+        for _, item in pairs(itemsFolder:GetChildren()) do
+            local bb = item:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Items end
+        end
+    end
+
+end)
+
+local trustedAnimationIds = {
+	["94317217837143"] = true, ["105840448036441"] = true, ["99215225043220"] = true, ["108907358619313"] = true,
+    ["107444859834748"] = true, ["124903763333174"] = true, ["123835423223220"] = true, ["112809109188560"] = true,
+    ["123923371062204"] = true, ["137809737339569"] = true, ["131123355704017"] = true, ["98675142200448"] = true,
+    ["109246041199659"] = true, ["140242176732868"] = true, ["105204810054381"] = true, ["80516583309685"] = true,
+    ["128195973631079"] = true, ["84307400688050"] = true, ["98733709078792"] = true, ["124234993291213"] = true,
+    ["82221759983649"] = true, ["75330693422988"] = true, ["117173212095661"] = true, ["74809026448465"] = true,
+    ["119942598489800"] = true, ["88589682639517"] = true, ["121954639447247"] = true, ["128856426573270"] = true,
+    ["85853080745515"] = true, ["109348678063422"] = true, ["80540530406270"] = true, ["131406927389838"] = true,
+    ["128367348686124"] = true, ["89004992452376"] = true, ["108610718831698"] = true, ["109570290393196"] = true,
+    ["96594507550917"] = true, ["125213046326879"] = true, ["79980897195554"] = true, ["93299090238530"] = true,
+    ["138547840635558"] = true, ["119664480754070"] = true, ["104910828105172"] = true, ["116581754553533"] = true,
+    ["92869747208256"] = true, ["114742322778642"] = true, ["70739368096233"] = true, ["96117920303138"] = true,
+    ["135319730390518"] = true, ["98742773509325"] = true, ["74842815979546"] = true, ["127557531826290"] = true,
+    ["108651070773439"] = true, ["105516183226360"] = true, ["113413858159336"] = true, ["105658601731267"] = true,
+    ["84116622032112"] = true, ["73662192846371"] = true, ["133709029886490"] = true, ["79612713897495"] = true,
+    ["94632255644411"] = true, ["71805956520207"] = true, ["139996647355899"] = true, ["77649238882198"] = true,
+    ["115678417928765"] = true, ["119583605486352"] = true, ["118562842802948"] = true, ["132581672170205"] = true, ["119583605486352"] = true,
+}
+
+-- 🖱️ Safe Click (mobile + PC)
+local function clickButton(btnName)
+	local gui = localPlayer:FindFirstChild("PlayerGui")
+	if not gui then return end
+
+	local mainUI = gui:FindFirstChild("MainUI")
+	local container = mainUI and mainUI:FindFirstChild("AbilityContainer")
+	local button = container and container:FindFirstChild(btnName)
+
+	if button and button:IsA("ImageButton") and button.Visible then
+		for _, conn in ipairs(getconnections(button.MouseButton1Click)) do
+			pcall(function()
+				conn:Fire()
+			end)
+		end
+	end
+end
+
+-- 🎯 Aimbot to target
+local function aimAtTarget(targetRoot)
+	local char = localPlayer.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp and targetRoot then
+		hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(targetRoot.Position.X, hrp.Position.Y, targetRoot.Position.Z))
+	end
+end
+
+-- 🔎 Hybrid predictive detection with linked auto punch
+local function setupPredictiveBlock(humanoid, targetRoot)
+	humanoid.AnimationPlayed:Connect(function(track)
+		if toggleOn then
+			local anim = track.Animation
+			if anim and anim.AnimationId then
+				local id = string.match(anim.AnimationId, "%d+")
+				local animName = anim.Name:lower()
+
+				local dist = (targetRoot.Position - localPlayer.Character.HumanoidRootPart.Position).Magnitude
+				if dist <= detectionRange then
+					if trustedAnimationIds[id]
+						or animName:find("slash")
+						or animName:find("punch")
+						or animName:find("stab")
+						or animName:find("Carving Slash")
+                        or animName:find("Lacerate")
+                        or animName:find("Perforating")
+
+						-- ✅ Block first
+						clickButton("Block")
+
+						-- ✅ If Auto Punch enabled, aim and punch after block
+						if autoPunchOn then
+							task.wait(0.1) -- small delay after block
+							aimAtTarget(targetRoot)
+							clickButton("Punch")
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+Combat:CreateToggle({
+	Name = "Auto Block (Predictive)",
+	CurrentValue = false,
+	Flag = "AutoBlock",
+	Callback = function(Value)
+		toggleOn = Value
+	end,
+})
+
+Combat:CreateToggle({
+	Name = "Auto Punch + Aimbot (After Block)",
+	CurrentValue = false,
+	Flag = "AutoPunch",
+	Callback = function(Value)
+		autoPunchOn = Value
+	end,
+})
+
+Combat:CreateSlider({
+	Name = "Detection Range",
+	Range = {5, 50},
+	Increment = 1,
+	CurrentValue = 20,
+	Flag = "DetectionRange",
+	Callback = function(Value)
+		detectionRange = Value
+	end,
+})
+
+-- 🔁 Setup connections for all players
+RunService.RenderStepped:Connect(function()
+	if not toggleOn then return end
+
+	local myChar = localPlayer.Character
+	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return end
+
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= localPlayer and otherPlayer.Character then
+			local root = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local humanoid = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+			if root and humanoid and not humanoid:FindFirstChild("BlockPredictSetup") then
+				local tag = Instance.new("BoolValue")
+				tag.Name = "BlockPredictSetup"
+				tag.Parent = humanoid
+				setupPredictiveBlock(humanoid, root)
+			end
+		end
+	end
+end)
