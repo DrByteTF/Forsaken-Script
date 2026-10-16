@@ -1,0 +1,1402 @@
+--[[
+    StarSaken — WindUI Edition (Fixed)
+    Full feature set, deduplicated services, fixed variable conflicts.
+    WARNING: Violates Roblox ToS. Use at your own risk.
+]]
+
+-- ==========================================
+-- Load WindUI
+-- ==========================================
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- ==========================================
+-- Services (declared ONCE)
+-- ==========================================
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace         = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- ==========================================
+-- Remote Event (shared)
+-- ==========================================
+local RemoteEvent = ReplicatedStorage:WaitForChild("Modules")
+    :WaitForChild("Network")
+    :WaitForChild("RemoteEvent")
+
+-- ==========================================
+-- Shared folders
+-- ==========================================
+local PlayersFolder     = Workspace:WaitForChild("Players")
+local KillersFolder     = PlayersFolder:WaitForChild("Killers")
+local SurvivorsFolder   = PlayersFolder:WaitForChild("Survivors")
+local ItemsFolder       = Workspace:FindFirstChild("Items")
+
+-- ==========================================
+-- WINDOW
+-- ==========================================
+local Window = WindUI:CreateWindow({
+    Title = "StarSaken",
+    Icon = "star",
+    Author = "WindUI Edition",
+    Folder = "StarSakenWindUI",
+    Size = UDim2.fromOffset(560, 460),
+    Transparent = true,
+    Theme = "Dark",
+    SideBarWidth = 170,
+    HideSearchBar = true,
+    ScrollBarEnabled = false,
+})
+
+local Main     = Window:Tab({ Title = "Main",     Icon = "home" })
+local ESPTab   = Window:Tab({ Title = "ESP",      Icon = "eye" })
+local Combat   = Window:Tab({ Title = "Combat",   Icon = "sword" })
+local Support  = Window:Tab({ Title = "Support",  Icon = "heart" })
+
+-- ==========================================
+-- MAIN TAB — Generator
+-- ==========================================
+local GenSection = Main:Section({ Title = "Generator", Opened = true })
+
+local autoGenEnabled = false
+local autoGenCooldown = 4
+
+GenSection:Toggle({
+    Title = "Auto Generator",
+    Default = false,
+    Callback = function(v) autoGenEnabled = v end,
+})
+
+GenSection:Slider({
+    Title = "Cooldown",
+    Step = 0.5,
+    Value = { Min = 1, Max = 15, Default = autoGenCooldown },
+    Callback = function(v) autoGenCooldown = v end,
+})
+
+-- ==========================================
+-- MAIN TAB — Player / Stamina
+-- ==========================================
+local PlayerSection = Main:Section({ Title = "Player", Opened = true })
+
+local SprintingModule = require(
+    ReplicatedStorage
+        :WaitForChild("Systems")
+        :WaitForChild("Character")
+        :WaitForChild("Game")
+        :WaitForChild("Sprinting")
+)
+
+local defaultLoss = SprintingModule.StaminaLoss
+local defaultGain = SprintingModule.StaminaGain
+
+local infStaminaEnabled = false
+local visualStaminaEnabled = false
+
+local function applyStamina()
+    if infStaminaEnabled then
+        SprintingModule.StaminaLoss = 0
+        SprintingModule.StaminaGain = 9999
+    else
+        SprintingModule.StaminaLoss = defaultLoss
+        SprintingModule.StaminaGain = defaultGain
+    end
+end
+
+PlayerSection:Toggle({
+    Title = "Inf Stamina",
+    Default = false,
+    Callback = function(v)
+        infStaminaEnabled = v
+        applyStamina()
+    end,
+})
+
+-- ==========================================
+-- Visual Stamina Billboard
+-- ==========================================
+local staminaConn
+
+local function getStaminaModule()
+    return require(
+        ReplicatedStorage
+            :WaitForChild("Systems")
+            :WaitForChild("Character")
+            :WaitForChild("Game")
+            :WaitForChild("Sprinting")
+    )
+end
+
+local function createStaminaDisplay()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    local head = character:WaitForChild("Head", 5)
+    if not head then return nil end
+
+    pcall(function()
+        local existing = head:FindFirstChild("StaminaDisplay")
+        if existing then existing:Destroy() end
+    end)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "StaminaDisplay"
+    billboard.Size = UDim2.new(3, 0, 1, 0)
+    billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.Enabled = visualStaminaEnabled
+    billboard.Parent = head
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextSize = 12
+    textLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    textLabel.TextStrokeTransparency = 0.4
+    textLabel.Text = "Stamina"
+    textLabel.Parent = billboard
+
+    return textLabel
+end
+
+local function updateStaminaDisplay(textLabel)
+    local module = getStaminaModule()
+    local current = math.floor(module.Stamina or 0)
+    local maxStam = module.MaxStamina or 100
+    textLabel.Text = "Stamina " .. current .. "/" .. maxStam
+end
+
+local function setupStaminaCharacter()
+    local textLabel = createStaminaDisplay()
+    if not textLabel then return end
+    if staminaConn then staminaConn:Disconnect() end
+    staminaConn = RunService.RenderStepped:Connect(function()
+        if visualStaminaEnabled then
+            pcall(updateStaminaDisplay, textLabel)
+        end
+    end)
+end
+
+PlayerSection:Toggle({
+    Title = "Visual Stamina",
+    Default = false,
+    Callback = function(v)
+        visualStaminaEnabled = v
+        local char = LocalPlayer.Character
+        if char then
+            local head = char:FindFirstChild("Head")
+            if head and head:FindFirstChild("StaminaDisplay") then
+                head.StaminaDisplay.Enabled = v
+            end
+        end
+    end,
+})
+
+applyStamina()
+
+if LocalPlayer.Character then
+    task.wait(1)
+    setupStaminaCharacter()
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    applyStamina()
+    setupStaminaCharacter()
+end)
+
+-- ==========================================
+-- Auto Generator Loop
+-- ==========================================
+task.spawn(function()
+    local lastFire = 0
+    while task.wait(0.1) do
+        if autoGenEnabled and tick() - lastFire >= autoGenCooldown then
+            pcall(function()
+                local mapFolder = Workspace:FindFirstChild("Map")
+                    and Workspace.Map:FindFirstChild("Ingame")
+                    and Workspace.Map.Ingame:FindFirstChild("Map")
+                if not mapFolder then return end
+                for _, gen in pairs(mapFolder:GetChildren()) do
+                    if gen.Name == "Generator"
+                        and gen:FindFirstChild("Remotes")
+                        and gen.Remotes:FindFirstChild("RE") then
+                        gen.Remotes.RE:FireServer()
+                    end
+                end
+            end)
+            lastFire = tick()
+        end
+    end
+end)
+
+-- ==========================================
+-- ESP TAB
+-- ==========================================
+local ESPState = {
+    Killers = false, Survivors = false, Generators = false, Items = false,
+}
+
+local ESPSection = ESPTab:Section({ Title = "Text ESP", Opened = true })
+
+ESPSection:Toggle({ Title = "Killers ESP",    Default = false, Callback = function(v) ESPState.Killers = v end })
+ESPSection:Toggle({ Title = "Survivors ESP",  Default = false, Callback = function(v) ESPState.Survivors = v end })
+ESPSection:Toggle({ Title = "Generators ESP", Default = false, Callback = function(v) ESPState.Generators = v end })
+ESPSection:Toggle({ Title = "Items ESP",      Default = false, Callback = function(v) ESPState.Items = v end })
+
+local function getMapFolder()
+    local map = Workspace:FindFirstChild("Map")
+    if map and map:FindFirstChild("Ingame") then
+        return map.Ingame:FindFirstChild("Map")
+    end
+end
+
+local function createESP(obj, color)
+    if obj:FindFirstChild("ESP_Tag") then return end
+    local adornee = obj:FindFirstChild("Head")
+        or obj:FindFirstChild("HumanoidRootPart")
+        or obj:FindFirstChildWhichIsA("BasePart")
+    if not adornee then return end
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "ESP_Tag"
+    bb.Adornee = adornee
+    bb.Size = UDim2.new(0, 90, 0, 18)
+    bb.StudsOffset = Vector3.new(0, 2, 0)
+    bb.AlwaysOnTop = true
+    bb.Enabled = false
+    bb.Parent = obj
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.TextSize = 9
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0.5
+    label.TextColor3 = color
+    label.Text = obj.Name
+    label.Parent = bb
+end
+
+task.spawn(function()
+    while task.wait(1.5) do
+        if ESPState.Killers and KillersFolder then
+            for _, k in pairs(KillersFolder:GetChildren()) do
+                if k:IsA("Model") then createESP(k, Color3.fromRGB(255, 0, 0)) end
+            end
+        end
+        if ESPState.Survivors and SurvivorsFolder then
+            for _, s in pairs(SurvivorsFolder:GetChildren()) do
+                if s:IsA("Model") then createESP(s, Color3.fromRGB(0, 170, 255)) end
+            end
+        end
+        if ESPState.Generators then
+            local mapFolder = getMapFolder()
+            if mapFolder then
+                for _, gen in pairs(mapFolder:GetChildren()) do
+                    if gen.Name == "Generator" then createESP(gen, Color3.fromRGB(170, 0, 255)) end
+                end
+            end
+        end
+        if ESPState.Items and ItemsFolder then
+            for _, item in pairs(ItemsFolder:GetChildren()) do
+                createESP(item, Color3.fromRGB(0, 170, 255))
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if KillersFolder then
+        for _, obj in pairs(KillersFolder:GetChildren()) do
+            local bb = obj:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Killers end
+        end
+    end
+    if SurvivorsFolder then
+        for _, obj in pairs(SurvivorsFolder:GetChildren()) do
+            local bb = obj:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Survivors end
+        end
+    end
+    local mapFolder = getMapFolder()
+    if mapFolder then
+        for _, gen in pairs(mapFolder:GetChildren()) do
+            local bb = gen:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Generators end
+        end
+    end
+    if ItemsFolder then
+        for _, item in pairs(ItemsFolder:GetChildren()) do
+            local bb = item:FindFirstChild("ESP_Tag")
+            if bb then bb.Enabled = ESPState.Items end
+        end
+    end
+end)
+
+-- ==========================================
+-- COMBAT — Pizza Aimbot
+-- ==========================================
+local PizzaSec = Combat:Section({ Title = "Pizza Aimbot", Opened = false })
+
+local pizzaAimEnabled = false
+local pizzaAimDistance = 100
+local pizzaTargetMode = false
+local pizzaSelectedTarget = nil
+
+PizzaSec:Toggle({
+    Title = "Pizza Aim",
+    Default = false,
+    Callback = function(v) pizzaAimEnabled = v end,
+})
+
+PizzaSec:Input({
+    Title = "Aim Distance",
+    Placeholder = "100",
+    Value = "100",
+    Callback = function(t)
+        local n = tonumber(t)
+        if n then pizzaAimDistance = n end
+    end,
+})
+
+PizzaSec:Toggle({
+    Title = "Target Mode",
+    Default = false,
+    Callback = function(v)
+        pizzaTargetMode = v
+        pizzaSelectedTarget = nil
+    end,
+})
+
+local currentPizzaOptions = {}
+
+local function buildPizzaPlayerList()
+    local list = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then table.insert(list, plr.Name) end
+    end
+    return list
+end
+
+local pizzaDropdown = PizzaSec:Dropdown({
+    Title = "Select Player",
+    Values = buildPizzaPlayerList(),
+    Value = nil,
+    Multi = false,
+    Callback = function(opt)
+        local name = type(opt) == "table" and opt[1] or opt
+        pizzaSelectedTarget = Players:FindFirstChild(name)
+    end,
+})
+
+PizzaSec:Button({
+    Title = "Refresh Player List",
+    Callback = function()
+        local newList = buildPizzaPlayerList()
+        pcall(function() pizzaDropdown:Refresh(newList, true) end)
+    end,
+})
+
+-- Pizza aim loop
+local pizzaAnims = {
+    ["114155003741146"] = true,
+    ["12662553001"] = true,
+    ["104033348426533"] = true,
+}
+
+local pizzaTarget, pizzaWasPlaying, pizzaAutoRotateOff = nil, false, false
+
+local function getLocalHumanoid()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildWhichIsA("Humanoid")
+end
+
+local function isLocalPlayingPizza()
+    local hum = getLocalHumanoid()
+    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    if not animator then return false end
+    for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+        local id = track.Animation and track.Animation.AnimationId
+        id = id and id:match("%d+")
+        if id and pizzaAnims[id] then return true end
+    end
+    return false
+end
+
+local function getWeakestSurvivor()
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local weakest, lowest = nil, math.huge
+    for _, m in ipairs(SurvivorsFolder:GetChildren()) do
+        if m:IsA("Model") and m ~= LocalPlayer.Character then
+            local h = m:FindFirstChildWhichIsA("Humanoid")
+            local r = m:FindFirstChild("HumanoidRootPart")
+            if h and r and h.Health > 0 then
+                local d = (r.Position - myRoot.Position).Magnitude
+                if d <= pizzaAimDistance and h.Health < lowest then
+                    lowest = h.Health
+                    weakest = m
+                end
+            end
+        end
+    end
+    return weakest
+end
+
+local function getSelectedCharacter()
+    local plr = pizzaSelectedTarget
+    local char = plr and plr.Character
+    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if char and hum and root and hum.Health > 0 then return char end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not pizzaAimEnabled then
+        pizzaTarget = nil
+        pizzaWasPlaying = false
+        if pizzaAutoRotateOff then
+            local h = getLocalHumanoid()
+            if h then h.AutoRotate = true end
+            pizzaAutoRotateOff = false
+        end
+        return
+    end
+
+    local hum = getLocalHumanoid()
+    local root = hum and hum.Parent:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return end
+
+    local playing = isLocalPlayingPizza()
+    if playing and not pizzaTarget then
+        pizzaTarget = pizzaTargetMode and getSelectedCharacter() or getWeakestSurvivor()
+    end
+    if not playing and pizzaWasPlaying then
+        pizzaTarget = nil
+        hum.AutoRotate = true
+        pizzaAutoRotateOff = false
+    end
+    pizzaWasPlaying = playing
+
+    if playing and pizzaTarget and pizzaTarget:FindFirstChild("HumanoidRootPart") then
+        local hrp = pizzaTarget.HumanoidRootPart
+        hum.AutoRotate = false
+        pizzaAutoRotateOff = true
+        local look = Vector3.new(hrp.Position.X, root.Position.Y, hrp.Position.Z)
+        root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, look), 0.95)
+    end
+end)
+
+-- ==========================================
+-- COMBAT — Auto Slash
+-- ==========================================
+local SlashSec = Combat:Section({ Title = "Auto Slash", Opened = false })
+
+local autoSlash = false
+local autoSlashAim = false
+local slashRage = 12
+local slashCooldown = 30
+local lastSlash = 0
+
+local slashTargets = {
+    "Slasher","c00lkidd","JohnDoe","1x1x1x1",
+    "Noli","Guest 666","Sixer","Nosferatu"
+}
+
+local slashHumanoid, slashHRP
+
+local function setupSlashChar(char)
+    slashHumanoid = char:WaitForChild("Humanoid", 5)
+    slashHRP = char:WaitForChild("HumanoidRootPart", 5)
+end
+
+if LocalPlayer.Character then setupSlashChar(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(setupSlashChar)
+
+local function getSlashTarget()
+    if not slashHRP then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local h = plr.Character:FindFirstChild("HumanoidRootPart")
+            if h and (h.Position - slashHRP.Position).Magnitude <= slashRage then
+                for _, n in ipairs(slashTargets) do
+                    if plr.Character.Name:lower():find(n:lower()) then
+                        return h
+                    end
+                end
+            end
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not slashHumanoid or not slashHRP then return end
+    local target = getSlashTarget()
+    if not target then return end
+
+    local now = tick()
+    local ready = (now - lastSlash) >= slashCooldown
+
+    if autoSlashAim and ready then
+        local dir = (target.Position - slashHRP.Position).Unit
+        local yaw = math.atan2(-dir.X, -dir.Z)
+        slashHRP.CFrame = CFrame.new(slashHRP.Position) * CFrame.Angles(0, yaw, 0)
+    end
+
+    if autoSlash and ready then
+        lastSlash = now
+        pcall(function()
+            RemoteEvent:FireServer("UseActorAbility", { buffer.fromstring("\3\5\0\0\0Slash") })
+        end)
+    end
+end)
+
+SlashSec:Toggle({ Title = "Auto Slash", Default = false, Callback = function(v) autoSlash = v end })
+SlashSec:Toggle({ Title = "Auto Aim",   Default = false, Callback = function(v) autoSlashAim = v end })
+SlashSec:Input({
+    Title = "Rage",
+    Placeholder = "12",
+    Value = "12",
+    Callback = function(t) local n = tonumber(t); if n then slashRage = n end end,
+})
+
+-- ==========================================
+-- COMBAT — Chance Aim (Flintlock)
+-- ==========================================
+local ChanceSec = Combat:Section({ Title = "Chance Aim", Opened = false })
+
+local chanceAimActive = false
+local chanceAimPrediction = 2
+local chanceAimDuration = 1.6
+local chanceAimTargets = {"Slasher","c00lkidd","JohnDoe","1x1x1x1","Noli","Guest 666","Sixer","Nosferatu"}
+local chanceMovementThreshold = 0.5
+local chanceHumanoid, chanceHRP
+local chanceLastTrigger = 0
+local chanceAiming = false
+local chanceOrigWS, chanceOrigAutoRotate
+local chancePrevFlintVisible = false
+
+local function configureChanceChar(char)
+    chanceHumanoid = char:FindFirstChild("Humanoid")
+    chanceHRP = char:FindFirstChild("HumanoidRootPart")
+end
+
+if LocalPlayer.Character then configureChanceChar(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(configureChanceChar)
+
+local function findChanceTarget()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, targetName in ipairs(chanceAimTargets) do
+                    if plr.Character.Name:lower():find(targetName:lower()) then
+                        return hrp
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function isFlintlockVisible()
+    if not LocalPlayer.Character then return false end
+    local flint = LocalPlayer.Character:FindFirstChild("Flintlock", true)
+    if not flint then return false end
+    if not flint:IsA("BasePart") then
+        flint = flint:FindFirstChildWhichIsA("BasePart", true)
+        if not flint then return false end
+    end
+    return flint.Transparency < 1
+end
+
+RunService.RenderStepped:Connect(function()
+    if not chanceAimActive or not chanceHumanoid or not chanceHRP then
+        if chanceAiming then
+            chanceAiming = false
+            if chanceOrigWS and chanceOrigAutoRotate ~= nil then
+                chanceHumanoid.WalkSpeed = chanceOrigWS
+                chanceHumanoid.AutoRotate = chanceOrigAutoRotate
+                chanceOrigWS, chanceOrigAutoRotate = nil, nil
+            end
+        end
+        return
+    end
+
+    local isVisible = isFlintlockVisible()
+    if not chanceAiming and isVisible and not chancePrevFlintVisible then
+        chanceLastTrigger = tick()
+        chanceAiming = true
+        chanceOrigWS = chanceHumanoid.WalkSpeed
+        chanceOrigAutoRotate = chanceHumanoid.AutoRotate
+    end
+    chancePrevFlintVisible = isVisible
+
+    if chanceAiming then
+        local elapsed = tick() - chanceLastTrigger
+        local targetHRP = findChanceTarget()
+        if not targetHRP
+            or (targetHRP.Position - chanceHRP.Position).Magnitude < 6
+            or elapsed > chanceAimDuration
+            or not isVisible then
+            chanceAiming = false
+            if chanceOrigWS and chanceOrigAutoRotate ~= nil then
+                chanceHumanoid.WalkSpeed = chanceOrigWS
+                chanceHumanoid.AutoRotate = chanceOrigAutoRotate
+                chanceOrigWS, chanceOrigAutoRotate = nil, nil
+            end
+            return
+        end
+
+        chanceHumanoid.AutoRotate = false
+        chanceHRP.AssemblyAngularVelocity = Vector3.zero
+
+        local targetPos = targetHRP.Position
+        if targetHRP.Velocity.Magnitude > chanceMovementThreshold then
+            targetPos = targetPos + (targetHRP.CFrame.LookVector * chanceAimPrediction)
+        end
+        local dir = (targetPos - chanceHRP.Position).Unit
+        local yaw = math.atan2(-dir.X, -dir.Z)
+        chanceHRP.CFrame = CFrame.new(chanceHRP.Position) * CFrame.Angles(0, yaw, 0)
+    end
+end)
+
+ChanceSec:Toggle({ Title = "Auto Aim", Default = false, Callback = function(v) chanceAimActive = v end })
+ChanceSec:Input({
+    Title = "Aim Prediction",
+    Placeholder = "2",
+    Value = "2",
+    Callback = function(t) local n = tonumber(t); if n then chanceAimPrediction = n end end,
+})
+
+-- ==========================================
+-- COMBAT — Dusekkar Aimbot
+-- ==========================================
+local DusekSec = Combat:Section({ Title = "Dusekkar Aimbot", Opened = false })
+
+local dusekEnabled = false
+local dusekMode = "Survivor"
+local dusekAnimIds = {"77894750279891", "118933622288262"}
+local dusekKillerNames = {"Slasher","c00lkidd","JohnDoe","1x1x1x1","Noli","Sixer","Nosferatu"}
+local dusekHealthPenalty = 1000
+local dusekAiming = false
+local dusekHumanoid, dusekAnimConn
+
+local function getNearestDusekTarget()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local survivors = PlayersFolder:FindFirstChild("Survivors")
+    local killers = PlayersFolder:FindFirstChild("Killers")
+    local best, bestScore = nil, math.huge
+
+    local function check(model, isKiller)
+        if not model:IsA("Model") or model == char then return end
+        if isKiller and not table.find(dusekKillerNames, model.Name) then return end
+        if not isKiller and table.find(dusekKillerNames, model.Name) then return end
+        local tHRP = model:FindFirstChild("HumanoidRootPart")
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        if not tHRP or not hum or hum.Health <= 0 then return end
+        local dist = (tHRP.Position - hrp.Position).Magnitude^2
+        local score = dist + (dusekHealthPenalty * (hum.Health / math.max(hum.MaxHealth,1)))
+        if score < bestScore then bestScore = score; best = tHRP end
+    end
+
+    if dusekMode == "Survivor" and survivors then
+        for _, m in ipairs(survivors:GetChildren()) do check(m, false) end
+    elseif dusekMode == "Killer" and killers then
+        for _, m in ipairs(killers:GetChildren()) do check(m, true) end
+    elseif dusekMode == "Random" then
+        if survivors then for _, m in ipairs(survivors:GetChildren()) do check(m,false) end end
+        if killers then for _, m in ipairs(killers:GetChildren()) do check(m,true) end end
+    end
+    return best
+end
+
+local function setupDusekChar(char)
+    dusekHumanoid = char:WaitForChild("Humanoid", 5)
+    if not dusekHumanoid then return end
+    if dusekAnimConn then pcall(function() dusekAnimConn:Disconnect() end) end
+
+    local animator = dusekHumanoid:FindFirstChildOfClass("Animator")
+    if animator then
+        dusekAnimConn = animator.AnimationPlayed:Connect(function(track)
+            local id = track.Animation.AnimationId:match("%d+")
+            if table.find(dusekAnimIds, id) then
+                task.delay(0.5, function() if dusekEnabled then dusekAiming = true end end)
+                track.Stopped:Once(function() dusekAiming = false end)
+            end
+        end)
+    end
+end
+
+if LocalPlayer.Character then setupDusekChar(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(function(c) task.delay(1, setupDusekChar, c) end)
+
+RunService.RenderStepped:Connect(function()
+    if not dusekEnabled or not dusekAiming or not dusekHumanoid then return end
+    local target = getNearestDusekTarget()
+    if target then
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+    end
+end)
+
+DusekSec:Toggle({ Title = "Aim", Default = false, Callback = function(v) dusekEnabled = v; dusekAiming = false end })
+DusekSec:Dropdown({
+    Title = "Aim Mode",
+    Values = {"Survivor", "Killer", "Random"},
+    Value = "Survivor",
+    Multi = false,
+    Callback = function(opt)
+        dusekMode = type(opt) == "table" and opt[1] or opt
+    end,
+})
+
+-- ==========================================
+-- COMBAT — Auto M1 Killer
+-- ==========================================
+local M1Sec = Combat:Section({ Title = "Auto M1 Killer", Opened = false })
+
+local M1Buffers = {
+    ["c00lkidd"]  = buffer.fromstring("\3\5\0\0\0Punch"),
+    ["Noli"]      = buffer.fromstring("\3\4\0\0\0Stab"),
+    ["Sixer"]     = buffer.fromstring("\3\13\0\0\0Carving Slash"),
+    ["Guest 666"] = buffer.fromstring("\3\13\0\0\0Carving Slash"),
+    ["Slasher"]   = buffer.fromstring("\3\5\0\0\0Slash"),
+    ["JohnDoe"]   = buffer.fromstring("\3\5\0\0\0Slash"),
+    ["1x1x1x1"]   = buffer.fromstring("\3\5\0\0\0Slash"),
+    ["Nosferatu"] = buffer.fromstring("\3\5\0\0\0Slash"),
+}
+
+local currentM1Buffer = buffer.fromstring("\3\5\0\0\0Slash")
+local m1AutoEnabled = false
+local m1FacingCheck = true
+local m1AimEnabled = true
+local m1Rage = 15
+
+local m1AntiAnims = {
+    ["rbxassetid://100926346851492"] = true, ["rbxassetid://140671644163156"] = true,
+    ["rbxassetid://72182155407310"]  = true, ["rbxassetid://72722244508749"]  = true,
+    ["rbxassetid://95802026624883"]  = true, ["rbxassetid://88557287105521"]  = true,
+    ["rbxassetid://82605295530067"]  = true, ["rbxassetid://96959123077498"]  = true,
+    ["rbxassetid://120748030255574"] = true, ["rbxassetid://88287038085804"]  = true,
+    ["rbxassetid://115706752305794"] = true, ["rbxassetid://82036084568393"]  = true,
+}
+
+local m1SkillSet = {
+    ["VoidRush"]=true,["Nova"]=true,["CorruptEnergy"]=true,["Behead"]=true,
+    ["GashingWound"]=true,["MassInfection"]=true,["CorruptNature"]=true,
+    ["WalkspeedOverride"]=true,["PizzaDelivery"]=true,["UnstableEye"]=true,
+    ["Entanglement"]=true,["DigitalFootprint"]=true,["404Error"]=true,
+    ["RagingPace"]=true,["DemonicPursuit"]=true,["InfernalCry"]=true,["BloodRush"]=true,
+}
+
+local function isKillerRole()
+    local char = LocalPlayer.Character
+    if not char or not char.Parent then return false end
+    return char.Parent ~= SurvivorsFolder
+end
+
+local function updateM1Buffer()
+    local char = LocalPlayer.Character
+    if char and isKillerRole() then
+        currentM1Buffer = M1Buffers[char.Name] or buffer.fromstring("\3\5\0\0\0Slash")
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    updateM1Buffer()
+end)
+
+local function getNearestSurvivorM1()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local best, dist = nil, math.huge
+    for _, m in ipairs(SurvivorsFolder:GetChildren()) do
+        local r = m:FindFirstChild("HumanoidRootPart")
+        local h = m:FindFirstChildWhichIsA("Humanoid")
+        if r and h and h.Health > 0 then
+            local d = (r.Position - root.Position).Magnitude
+            if d < dist and d <= m1Rage then dist = d; best = m end
+        end
+    end
+    return best
+end
+
+local function targetUsingRageAnim(target)
+    local hum = target and target:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return false end
+    local animator = hum:FindFirstChildWhichIsA("Animator")
+    if not animator then return false end
+    for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+        if m1AntiAnims[track.Animation.AnimationId] then return true end
+    end
+    return false
+end
+
+local function isUsingProtectedSkill(target)
+    if targetUsingRageAnim(target) then return true end
+    for skill in pairs(m1SkillSet) do
+        if target:FindFirstChild(skill) then return true end
+    end
+    return false
+end
+
+local m1LastFire = 0
+local m1Cooldown = 0.1
+
+local function fireM1()
+    if tick() - m1LastFire < m1Cooldown then return end
+    m1LastFire = tick()
+    RemoteEvent:FireServer("UseActorAbility", {currentM1Buffer})
+end
+
+RunService.RenderStepped:Connect(function()
+    if not m1AutoEnabled then return end
+    if not isKillerRole() then return end
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root or hum.Health <= 0 then return end
+
+    local target = getNearestSurvivorM1()
+    if not target then hum.AutoRotate = true return end
+    if isUsingProtectedSkill(target) then hum.AutoRotate = true return end
+
+    local tr = target:FindFirstChild("HumanoidRootPart")
+    if not tr then return end
+
+    if m1FacingCheck then
+        local toTarget = (tr.Position - root.Position).Unit
+        local forward = root.CFrame.LookVector
+        if toTarget:Dot(forward) <= 0.0 then hum.AutoRotate = true return end
+    end
+
+    fireM1()
+
+    if m1AimEnabled then
+        hum.AutoRotate = false
+        local lookPos = Vector3.new(tr.Position.X, root.Position.Y, tr.Position.Z)
+        root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, lookPos), 0.9)
+    else
+        hum.AutoRotate = true
+    end
+end)
+
+if LocalPlayer.Character then updateM1Buffer() end
+
+M1Sec:Toggle({ Title = "Auto M1", Default = false, Callback = function(v) m1AutoEnabled = v end })
+M1Sec:Toggle({ Title = "Facing Check", Default = true, Callback = function(v) m1FacingCheck = v end })
+M1Sec:Input({
+    Title = "Rage",
+    Placeholder = "15",
+    Value = "15",
+    Callback = function(t) local n = tonumber(t); if n then m1Rage = math.clamp(n, 1, 50) end end,
+})
+
+-- ==========================================
+-- COMBAT — Auto Block
+-- ==========================================
+local BlockSec = Combat:Section({ Title = "Auto Block", Opened = false })
+
+local blockEnabled = false
+local blockMode = "Block"
+local blockFacing = true
+local blockAutoPunch = false
+local blockAimPunch = false
+local blockRage = 20
+
+local blockLastTime = 0
+local blockLastPunch = 0
+local BLOCK_CD = 0.7
+local PUNCH_CD = 0.6
+local AIM_WINDOW = 0.5
+local AIM_COOLDOWN = 0.6
+
+local blockPrevPlaying = {}
+local lastAimTrigger = {}
+
+local blockKillerNames = {"c00lkidd","Jason","JohnDoe","1x1x1x1","Noli","Slasher","Sixer","Nosferatu"}
+local killerDelayMap = {
+    ["c00lkidd"]=0, ["jason"]=0.005, ["slasher"]=0.005,
+    ["1x1x1x1"]=0.15, ["johndoe"]=0.33, ["noli"]=0.14, ["nosferatu"]=0.7,
+}
+
+local blockTriggerAnims = {
+    "105458270463374","126830014841198","129260077168659","114375669802778",
+    "80208162053146","135853087227453","88451353906104","116618003477002",
+    "83829782357897","118298475669935","74707328554358","109667959938617",
+    "120112897026015","125403313786645","94958041603347",
+    "130958529065375","106860049270347","124705663396411","70948173568515",
+    "126355327951215","82113744478546","133336594357903","126681776859538",
+    "81639435858902","126727756047566","110702884830060",
+    "101736016625776","109845134167647","121086746534252","113440898787986",
+    "118901677478609","86204001129974","81255669374177","83446441317389",
+    "129976080405072","140125695162370","77154853064447","93316899246221",
+    "137314737492715","138390711856189","121043188582126","106847695270773",
+    "91758760621955","114356208094580","126896426760253","135884061951801",
+    "139321362207112","137642639873297","132221505301108","94634594529334",
+    "100358581940485","86185540502966","106538427162796","77375846492436",
+    "93366464803829","91509234639766","86510482379594","133990700986998",
+    "84895799077246","84413781229733","128414736976503","133363345661032",
+    "139309647473555","122709416391891","91628732643385",
+    "124269076578545","90620531468240","71834552297085",
+    "110877859670130","12222208","10548112","127324570265084","105937652127383",
+    "102923788301986","11998777","88970503168421",
+    "81299297965542","93069721274110","97167027849946","118919403162061",
+    "131219306779772","106776364623742","127846074966393","123345437821399",
+    "18885909645","121080480916189","131543461321709","84069821282466",
+    "114126519127454","70371667919898","137679730950847"
+}
+
+local punchAnimIds = {
+    "87259391926321","138040001965654","136007065400978","108911997126897",
+    "129843313690921","81905101227053","113936304594883","140703210927645",
+    "86709774283672","119850211147676","108807732150251","111270184603402",
+    "86096387000557","99422325754526","82137285150006",
+    "78440860685556"
+}
+
+local function fireBlockRemote()
+    RemoteEvent:FireServer("UseActorAbility", { [1] = buffer.fromstring("\3\5\0\0\0Block") })
+end
+
+local function fireCloneRemote()
+    RemoteEvent:FireServer("UseActorAbility", { [1] = buffer.fromstring("\3\5\0\0\0Clone") })
+end
+
+local function firePunchRemote()
+    RemoteEvent:FireServer("UseActorAbility", { [1] = buffer.fromstring("\3\5\0\0\0Punch") })
+end
+
+local function getLocalRoot()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getLocalHum()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getNearestKillerBlock()
+    local myRoot = getLocalRoot()
+    if not myRoot then return nil end
+    local nearest, minDist = nil, math.huge
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local char = plr.Character
+            if char then
+                local isKiller = false
+                for _, name in ipairs(blockKillerNames) do
+                    if char.Name:lower():find(name:lower()) then isKiller = true break end
+                end
+                if isKiller then
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if root then
+                        local dist = (root.Position - myRoot.Position).Magnitude
+                        if dist < minDist and dist <= blockRage then
+                            minDist = dist; nearest = root
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function getPunchCharges()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local mainUI = pg and pg:FindFirstChild("MainUI")
+    local ability = mainUI and mainUI:FindFirstChild("AbilityContainer")
+    local punchBtn = ability and ability:FindFirstChild("Punch")
+    local charges = punchBtn and punchBtn:FindFirstChild("Charges")
+    if not charges then return 0 end
+    return tonumber(charges.Text) or 0
+end
+
+RunService.RenderStepped:Connect(function()
+    local myRoot = getLocalRoot()
+    if not myRoot then return end
+    local now = tick()
+    local myHum = getLocalHum()
+
+    if blockEnabled then
+        local currentPlaying = {}
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer then
+                local char = plr.Character
+                if char then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if hum and root then
+                        local dist = (root.Position - myRoot.Position).Magnitude
+                        if dist <= blockRage then
+                            local animator = hum:FindFirstChildOfClass("Animator")
+                            if animator then
+                                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                                    local animId = tostring(track.Animation and track.Animation.AnimationId or ""):match("%d+")
+                                    if animId and table.find(blockTriggerAnims, animId) then
+                                        currentPlaying[animId] = true
+                                        local facing = true
+                                        if blockFacing then
+                                            local toT = (root.Position - myRoot.Position).Unit
+                                            facing = toT:Dot(myRoot.CFrame.LookVector) > -0.3
+                                        end
+                                        if not blockPrevPlaying[animId] and facing then
+                                            local delay = killerDelayMap[char.Name:lower()] or 0
+                                            task.delay(delay, function()
+                                                if blockEnabled and (tick() - blockLastTime) > BLOCK_CD then
+                                                    if blockMode == "Block" then fireBlockRemote() else fireCloneRemote() end
+                                                    blockLastTime = tick()
+                                                end
+                                            end)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        blockPrevPlaying = currentPlaying
+    else
+        blockPrevPlaying = {}
+    end
+
+    if blockAutoPunch and myHum then
+        local charges = getPunchCharges()
+        if charges >= 1 then
+            local targetRoot = getNearestKillerBlock()
+            if targetRoot and (targetRoot.Position - myRoot.Position).Magnitude <= math.min(blockRage, 10) then
+                if (now - blockLastPunch) > PUNCH_CD then
+                    firePunchRemote()
+                    blockLastPunch = now
+                end
+            end
+        end
+    end
+
+    if blockAimPunch and myHum then
+        local animator = myHum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+                local animId = tostring(track.Animation and track.Animation.AnimationId or ""):match("%d+")
+                if animId and table.find(punchAnimIds, animId) then
+                    local last = lastAimTrigger[track]
+                    if not last or (now - last) > AIM_COOLDOWN then
+                        local timePos = 0
+                        pcall(function() timePos = track.TimePosition end)
+                        if timePos <= 0.1 then
+                            lastAimTrigger[track] = now
+                            local targetRoot = getNearestKillerBlock()
+                            if targetRoot then
+                                local predicted = targetRoot.Position + (targetRoot.CFrame.LookVector * 4)
+                                task.spawn(function()
+                                    local start = now
+                                    while tick() - start < AIM_WINDOW do
+                                        if myRoot and myRoot.Parent and targetRoot and targetRoot.Parent then
+                                            local look = Vector3.new(predicted.X, myRoot.Position.Y, predicted.Z)
+                                            myRoot.CFrame = myRoot.CFrame:Lerp(CFrame.lookAt(myRoot.Position, look), 0.7)
+                                        end
+                                        task.wait()
+                                    end
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    blockPrevPlaying = {}
+    lastAimTrigger = {}
+    blockLastTime = 0
+    blockLastPunch = 0
+end)
+
+BlockSec:Toggle({ Title = "Auto Block", Default = false, Callback = function(v) blockEnabled = v end })
+BlockSec:Dropdown({
+    Title = "Mode",
+    Values = {"Block", "Clone"},
+    Value = "Block",
+    Multi = false,
+    Callback = function(opt) blockMode = type(opt) == "table" and opt[1] or opt end,
+})
+BlockSec:Input({
+    Title = "Rage",
+    Placeholder = "20",
+    Value = "20",
+    Callback = function(t) local n = tonumber(t); if n then blockRage = n end end,
+})
+BlockSec:Toggle({ Title = "Facing Check", Default = true, Callback = function(v) blockFacing = v end })
+BlockSec:Toggle({ Title = "Auto Punch", Default = false, Callback = function(v) blockAutoPunch = v end })
+BlockSec:Toggle({ Title = "Punch Aim", Default = false, Callback = function(v) blockAimPunch = v end })
+
+-- ==========================================
+-- COMBAT — Auto Parry
+-- ==========================================
+local ParrySec = Combat:Section({ Title = "Auto Parry", Opened = false })
+
+local parryAuto = false
+local parryRage = 19
+local PARRY_CD = 5
+local SPAM_TIME = 3
+local parryCooldowns = {}
+
+local BUF_404 = buffer.fromstring("\3\8\0\0\0" .. "404Error")
+local BUF_RAGE = buffer.fromstring("\3\10\0\0\0RagingPace")
+
+local parryAnims = {
+    ["87259391926321"]=true,["138040001965654"]=true,["136007065400978"]=true,
+    ["108911997126897"]=true,["129843313690921"]=true,["81905101227053"]=true,
+    ["113936304594883"]=true,["140703210927645"]=true,["86709774283672"]=true,
+    ["119850211147676"]=true,["108807732150251"]=true,["111270184603402"]=true,
+    ["86096387000557"]=true,["99422325754526"]=true,["82137285150006"]=true,
+    ["78440860685556"]=true,["138008678294576"]=true,["108137703081583"]=true,
+    ["111351142668768"]=true,["97020933136241"]=true,["80109359274646"]=true,
+    ["91876712939436"]=true,["80872238342472"]=true,["129228295705213"]=true,
+    ["118647044497447"]=true,["116618003477002"]=true,["122503338277352"]=true,
+    ["131696603025265"]=true,["119462383658044"]=true,["77448521277146"]=true,
+    ["108773914369470"]=true,["98031287364865"]=true,["121255898612475"]=true,
+    ["110400453990786"]=true,["105614318732282"]=true,
+}
+
+local function fireSkill(buf)
+    RemoteEvent:FireServer("UseActorAbility", { buf })
+end
+
+RunService.Heartbeat:Connect(function()
+    if not parryAuto then return end
+    local myChar = LocalPlayer.Character
+    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - myHRP.Position).Magnitude
+                if dist <= parryRage and (not parryCooldowns[plr] or tick() - parryCooldowns[plr] >= PARRY_CD) then
+                    local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+                            local id = tostring(track.Animation.AnimationId):match("%d+")
+                            if id and parryAnims[id] then
+                                parryCooldowns[plr] = tick()
+                                task.spawn(function()
+                                    fireSkill(BUF_RAGE)
+                                    task.wait(0.15)
+                                    local t = tick()
+                                    while tick() - t < SPAM_TIME do
+                                        fireSkill(BUF_404)
+                                        task.wait(0.05)
+                                    end
+                                end)
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+ParrySec:Toggle({ Title = "Auto Parry", Default = false, Callback = function(v) parryAuto = v end })
+ParrySec:Input({
+    Title = "Rage",
+    Placeholder = "19",
+    Value = "19",
+    Callback = function(txt) local v = tonumber(txt); if v then parryRage = math.clamp(v, 5, 50) end end,
+})
+
+-- ==========================================
+-- COMBAT — QTE
+-- ==========================================
+local QTESec = Combat:Section({ Title = "QTE Nosferatu", Opened = false })
+
+local autoQTE = false
+local qteDelay = 0.05
+
+QTESec:Toggle({ Title = "Auto QTE (Mobile)", Default = false, Callback = function(v) autoQTE = v end })
+QTESec:Input({
+    Title = "QTE Delay",
+    Placeholder = "0.05",
+    Value = "0.05",
+    Callback = function(txt)
+        local n = tonumber(txt)
+        if n and n >= 0 and n <= 10 then qteDelay = n end
+    end,
+})
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoQTE then
+            pcall(function()
+                local tempUI = LocalPlayer.PlayerGui:FindFirstChild("TemporaryUI")
+                local qte = tempUI and tempUI:FindFirstChild("QTE")
+                local btn = qte and qte:FindFirstChild("ActiveButton")
+                if btn and getconnections then
+                    for _, conn in ipairs(getconnections(btn.MouseButton1Down)) do
+                        pcall(conn.Function)
+                    end
+                end
+            end)
+            task.wait(qteDelay)
+        end
+    end
+end)
+
+-- ==========================================
+-- COMBAT — 1x1x1x1 Aim
+-- ==========================================
+local OneSec = Combat:Section({ Title = "1x1x1x1 Aim", Opened = false })
+
+local oneEnabled = false
+local oneMode = "One Player"
+local onePredict = false
+
+local oneKillerModels = { ["1x1x1x1"] = true }
+
+local oneDangerAnims = {
+    ["119181003138006"]=true,["99050723653468"]=true,["100592913030351"]=true,
+    ["81935774508746"]=true,["116814116277716"]=true,["86799093901669"]=true,
+    ["83685305553364"]=true,["99030950661794"]=true,["101101433684051"]=true,
+    ["116787687605496"]=true,["109777684604906"]=true,["105026134432828"]=true,
+    ["91237398850193"]=true,["104897856211468"]=true,["112598064360414"]=true,
+}
+
+local oneTarget, oneWasPlaying, oneAutoRotateOff = nil, false, false
+
+local function isOneKiller()
+    local char = LocalPlayer.Character
+    return char and oneKillerModels[char.Name] or false
+end
+
+local function isPlayingOneDangerous()
+    local hum = getLocalHumanoid()
+    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    if not animator then return false end
+    for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+        local id = tostring(track.Animation.AnimationId):match("%d+")
+        if id and oneDangerAnims[id] then return true end
+    end
+    return false
+end
+
+local function getClosestSurvivorOne()
+    local myRoot = getLocalRoot()
+    if not myRoot then return nil end
+    local closest, dist = nil, math.huge
+    for _, m in ipairs(SurvivorsFolder:GetChildren()) do
+        if m:IsA("Model") then
+            local hrp = m:FindFirstChild("HumanoidRootPart")
+            local hum = m:FindFirstChildWhichIsA("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local mag = (hrp.Position - myRoot.Position).Magnitude
+                if mag < dist then closest = m; dist = mag end
+            end
+        end
+    end
+    return closest
+end
+
+RunService.RenderStepped:Connect(function()
+    if not oneEnabled then
+        local hum = getLocalHumanoid()
+        if hum and oneAutoRotateOff then
+            hum.AutoRotate = true
+            oneAutoRotateOff = false
+        end
+        oneTarget = nil
+        oneWasPlaying = false
+        return
+    end
+    if not isOneKiller() then return end
+
+    local hum = getLocalHumanoid()
+    local root = getLocalRoot()
+    if not hum or not root then return end
+
+    local playing = isPlayingOneDangerous()
+    if playing and not oneTarget then
+        oneTarget = getClosestSurvivorOne()
+    end
+    if not playing and oneWasPlaying then
+        oneTarget = nil
+        if oneAutoRotateOff then
+            hum.AutoRotate = true
+            oneAutoRotateOff = false
+        end
+    end
+    oneWasPlaying = playing
+
+    if oneTarget and playing then
+        local hrp = oneTarget:FindFirstChild("HumanoidRootPart")
+        local tHum = oneTarget:FindFirstChildWhichIsA("Humanoid")
+        if not hrp or not tHum or tHum.Health <= 0 then
+            oneTarget = nil
+            return
+        end
+
+        if not oneAutoRotateOff then
+            hum.AutoRotate = false
+            oneAutoRotateOff = true
+        end
+
+        local targetPos = hrp.Position
+        if onePredict and hrp.Velocity.Magnitude > 2 then
+            targetPos = targetPos + hrp.CFrame.LookVector * 3
+        end
+
+        local lookAt = Vector3.new(targetPos.X, root.Position.Y, targetPos.Z)
+        if oneMode == "One Player" then
+            root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, lookAt), 0.99)
+        elseif oneMode == "Multi Players" then
+            oneTarget = getClosestSurvivorOne()
+            root.CFrame = root.CFrame:Lerp(CFrame.lookAt(root.Position, lookAt), 0.99)
+        end
+    end
+end)
+
+OneSec:Toggle({ Title = "Aim", Default = false, Callback = function(v) oneEnabled = v end })
+OneSec:Dropdown({
+    Title = "Mode",
+    Values = {"One Player", "Multi Players"},
+    Value = "One Player",
+    Multi = false,
+    Callback = function(v) oneMode = type(v) == "table" and v[1] or v end,
+})
+OneSec:Toggle({ Title = "Predict Movement", Default = false, Callback = function(v) onePredict = v end })
+
+-- ==========================================
+-- SUPPORT TAB
+-- ==========================================
+local SupSec = Support:Section({ Title = "Support", Opened = true })
+
+SupSec:Paragraph({
+    Title = "YouTube",
+    Content = "Subscribe my youtube channel",
+})
+SupSec:Button({
+    Title = "📋 Copy YouTube Link",
+    Callback = function() setclipboard("https://www.youtube.com/@Mìbì-Official") end,
+})
+
+print("StarSaken loaded.")
