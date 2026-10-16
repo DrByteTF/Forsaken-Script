@@ -1,0 +1,629 @@
+--[[
+    Hybrid Auto Block Hub — Guesting Hub + Fartsaken logic
+    Combines animation/sound detection with predictive hitbox blocking.
+    UI: WindUI (mobile-friendly)
+    WARNING: Violates Roblox ToS. Use at your own risk.
+]]
+
+-- ==========================================
+-- Load WindUI
+-- ==========================================
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- ==========================================
+-- Services
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- Remote
+-- ==========================================
+local RemoteEvent = nil
+pcall(function()
+    RemoteEvent = ReplicatedStorage:WaitForChild("Modules", 10)
+        :WaitForChild("Network", 10)
+        :WaitForChild("Network", 10)
+        :WaitForChild("RemoteEvent", 10)
+end)
+
+-- ==========================================
+-- Config
+-- ==========================================
+local Config = {
+    -- Master
+    AutoBlockOn = false,
+    BlockMode = "Hybrid",   -- "Animation", "Sound", "Hitbox", "Hybrid"
+
+    -- Range & Facing
+    DetectionRange = 13,
+    VerifyFacing = true,
+    FacingDot = 0.5,
+
+    -- Blocking
+    BlockDelay = 0,
+    BlockCooldown = 0.35,
+    DoubleBlock = false,
+
+    -- Auto Punch
+    AutoPunchOn = false,
+    AutoPunchDelay = 0.3,
+
+    -- Hitbox (Fartsaken-style)
+    HitboxEnabled = true,
+    HitboxRange = 18,
+    HitboxSize = Vector3.new(4.5, 6, 7.5),
+    HitboxMargin = 0.05,
+
+    -- Animation (Guesting Hub style)
+    AnimEnabled = true,
+    AnimRange = 18,
+    AnimBlockDelay = 0,
+
+    -- Anti-Bait
+    AntiBait = false,
+}
+
+-- ==========================================
+-- State
+-- ==========================================
+local blockLastTime = 0
+local BLOCK_CD = 0.1
+local cachedHRP = nil
+local animBlockConn = nil
+local hitboxConn = nil
+local hitboxHeartbeat = nil
+local soundBlockedUntil = {}
+local hookedSounds = {}
+
+-- ==========================================
+-- Trigger Animation IDs (Guesting Hub style)
+-- ==========================================
+local TRIGGER_ANIMS = {
+    ["114506382930939"]=true,["127245564598429"]=true,["99829427721752"]=true,
+    ["138938529389204"]=true,["111647315359080"]=true,["92567970681901"]=true,
+    ["124269076578545"]=true,["94958041603347"]=true,["109667959938617"]=true,
+    ["130958529065375"]=true,["118298475669935"]=true,["126830014841198"]=true,
+    ["126355327951215"]=true,["121086746534252"]=true,["18885909645"]=true,
+    ["98456918873918"]=true,["105458270463374"]=true,["83829782357897"]=true,
+    ["125403313786645"]=true,["82113744478546"]=true,["70371667919898"]=true,
+    ["99135633258223"]=true,["7167027849946"]=true,["109230267448394"]=true,
+    ["139835501033932"]=true,["126996426760253"]=true,["88451353906104"]=true,
+    ["106538427162796"]=true,["122709416391891"]=true,["139309647473555"]=true,
+    ["90620531468240"]=true,["91509234639766"]=true,["99824350842479"]=true,
+    ["126171487400618"]=true,["101101433684051"]=true,["106860049270347"]=true,
+    ["70483423693126"]=true,["126727756047566"]=true,["137642639873297"]=true,
+    ["77375846492436"]=true,["126681776859538"]=true,["129976080405072"]=true,
+    ["121293883585738"]=true,["81639435858902"]=true,["137314737492715"]=true,
+    ["92173139187970"]=true,["108196996477620"]=true,["90819435118493"]=true,
+    ["123172382755876"]=true,
+}
+
+-- ==========================================
+-- Trigger Sound IDs (Guesting Hub style)
+-- ==========================================
+local TRIGGER_SOUNDS = {
+    ["140242176732868"]=true,["136323728355613"]=true,
+    ["115026634746636"]=true,["84116622032112"]=true,["108907358619313"]=true,["127793641088496"]=true,
+    ["86174610237192"]=true,["95079963655241"]=true,["101199185291628"]=true,["119942598489800"]=true,
+    ["84307400688050"]=true,["105200830849301"]=true,["75330693422988"]=true,
+    ["82221759983649"]=true,["81702359653578"]=true,["85853080745515"]=true,
+    ["108610718831698"]=true,["112395455254818"]=true,["109431876587852"]=true,["12222216"]=true,
+    ["79980897195554"]=true,["119583605486352"]=true,["71834552297085"]=true,["116581754553533"]=true,
+    ["86833981571073"]=true,["110372418055226"]=true,["105840448036441"]=true,["86494585504534"]=true,
+    ["80516583309685"]=true,["131406927389838"]=true,["89004992452376"]=true,["117231507259853"]=true,
+    ["101698569375359"]=true,["101553872555606"]=true,["140412278320643"]=true,["106300477136129"]=true,
+    ["117173212095661"]=true,["104910828105172"]=true,["140194172008986"]=true,["85544168523099"]=true,
+    ["114506382930939"]=true,["99829427721752"]=true,["120059928759346"]=true,["104625283622511"]=true,
+    ["105316545074913"]=true,["126131675979001"]=true,["82336352305186"]=true,["93366464803829"]=true,
+    ["84069821282466"]=true,["128856426573270"]=true,["121954639447247"]=true,["128195973631079"]=true,
+    ["124903763333174"]=true,["94317217837143"]=true,["98111231282218"]=true,["119089145505438"]=true,
+    ["136728245733659"]=true,["107444859834748"]=true,["76959687420003"]=true,
+    ["72425554233832"]=true,["96594507550917"]=true,["139996647355899"]=true,["107345261604889"]=true,
+    ["127557531826290"]=true,["108651070773439"]=true,["74842815979546"]=true,["124397369810639"]=true,
+    ["76467993976301"]=true,["118493324723683"]=true,["78298577002481"]=true,["116527305931161"]=true,
+    ["5148302439"]=true,["98675142200448"]=true,["128367348686124"]=true,["71805956520207"]=true,
+    ["125213046326879"]=true,["103684883268194"]=true,["109246041199659"]=true,
+    ["80540530406270"]=true,["139523195429581"]=true,["105204810054381"]=true,["114742322778642"]=true,
+    ["116468089135195"]=true,["112809109188560"]=true,["109348678063422"]=true,
+    ["133709029886490"]=true,
+}
+
+-- ==========================================
+-- Helpers
+-- ==========================================
+local function getKillersFolder()
+    local p = Workspace:FindFirstChild("Players")
+    return p and p:FindFirstChild("Killers")
+end
+
+local function fireBlock()
+    if not RemoteEvent then return end
+    pcall(function()
+        RemoteEvent:FireServer("UseActorAbility", {[1] = buffer.fromstring("\3\5\0\0\0Block")})
+    end)
+end
+
+local function firePunch()
+    if not RemoteEvent then return end
+    pcall(function()
+        RemoteEvent:FireServer("UseActorAbility", {[1] = buffer.fromstring("\3\5\0\0\0Punch")})
+    end)
+end
+
+local function isFacing(myRoot, targetRoot, killerName)
+    if not Config.VerifyFacing then return true end
+    if not myRoot or not targetRoot then return false end
+    local diff = myRoot.Position - targetRoot.Position
+    if diff.Magnitude < 0.01 then return true end
+    local dir = diff.Unit
+    local dot = targetRoot.CFrame.LookVector:Dot(dir)
+    return dot > Config.FacingDot
+end
+
+local function cacheHRP(char)
+    cachedHRP = char and char:FindFirstChild("HumanoidRootPart")
+end
+if LocalPlayer.Character then cacheHRP(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(cacheHRP)
+
+local function getRoot()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function isBlockReady()
+    local ui = LocalPlayer:FindFirstChild("PlayerGui")
+    if ui then
+        local m = ui:FindFirstChild("MainUI")
+        if m then
+            local ac = m:FindFirstChild("AbilityContainer")
+            if ac then
+                local bl = ac:FindFirstChild("Block")
+                if bl then
+                    local ct = bl:FindFirstChild("CooldownTime")
+                    if ct and ct:IsA("TextLabel") then
+                        local num = ct.Text:match("[%d%.]+")
+                        if num then
+                            local v = tonumber(num)
+                            return not v or v <= 0
+                        end
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return tick() - blockLastTime >= Config.BlockCooldown
+end
+
+local function attemptBlock(killerModel, distance)
+    if not Config.AutoBlockOn then return end
+    if not isBlockReady() then return end
+    if distance > Config.DetectionRange then return end
+
+    local root = getRoot()
+    if not root then return end
+
+    local hrp = killerModel:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if not isFacing(root, hrp, killerModel.Name) then return end
+
+    if Config.BlockDelay > 0 then task.wait(Config.BlockDelay) end
+
+    fireBlock()
+    blockLastTime = tick()
+
+    if Config.AutoPunchOn then
+        task.delay(Config.AutoPunchDelay, firePunch)
+    end
+end
+
+-- ==========================================
+-- Animation Auto-Block (Guesting Hub style)
+-- ==========================================
+local function setupAnimBlock()
+    if animBlockConn then animBlockConn:Disconnect(); animBlockConn = nil end
+    if not Config.AnimEnabled then return end
+
+    animBlockConn = RunService.Heartbeat:Connect(function()
+        if not Config.AnimEnabled or not Config.AutoBlockOn then return end
+        local myRoot = cachedHRP
+        if not myRoot then return end
+        local kf = getKillersFolder()
+        if not kf then return end
+
+        for _, killer in ipairs(kf:GetChildren()) do
+            local khrp = killer:FindFirstChild("HumanoidRootPart")
+            local khum = killer:FindFirstChildOfClass("Humanoid")
+            if not khrp or not khum then continue end
+
+            local dist = (khrp.Position - myRoot.Position).Magnitude
+            if dist > Config.AnimRange then continue end
+            if not isFacing(myRoot, khrp, killer.Name) then continue end
+
+            local anim = khum:FindFirstChildOfClass("Animator")
+            if not anim then continue end
+
+            local ok, tracks = pcall(function() return anim:GetPlayingAnimationTracks() end)
+            if not ok then continue end
+
+            for _, track in ipairs(tracks) do
+                local animId
+                pcall(function()
+                    animId = tostring(track.Animation and track.Animation.AnimationId or ""):match("%d+")
+                end)
+                if animId and TRIGGER_ANIMS[animId] then
+                    local now = tick()
+                    if now - blockLastTime >= BLOCK_CD then
+                        blockLastTime = now
+                        local function doBlock()
+                            fireBlock()
+                            if Config.DoubleBlock then
+                                task.wait(0.05)
+                                firePunch()
+                            end
+                        end
+                        if Config.AnimBlockDelay > 0 then
+                            task.delay(Config.AnimBlockDelay, doBlock)
+                        else
+                            doBlock()
+                        end
+                    end
+                    break
+                end
+            end
+        end
+    end)
+end
+
+-- ==========================================
+-- Sound Auto-Block (Guesting Hub style)
+-- ==========================================
+local function hookSound(sound)
+    if not sound or not sound:IsA("Sound") or hookedSounds[sound] then return end
+    local preId = tostring(sound.SoundId):match("%d+")
+    if not preId or not TRIGGER_SOUNDS[preId] then return end
+
+    local pc = sound.Played:Connect(function()
+        if Config.AutoBlockOn and Config.BlockMode ~= "Animation" and Config.BlockMode ~= "Hitbox" then
+            local now = tick()
+            if soundBlockedUntil[sound] and now < soundBlockedUntil[sound] then return end
+
+            local root = getRoot()
+            if not root then return end
+
+            local soundPart = sound.Parent
+            if not soundPart or not soundPart:IsA("BasePart") then
+                local att = sound.Parent
+                if att and att:IsA("Attachment") then soundPart = att.Parent end
+            end
+            if not soundPart then return end
+
+            local killer = soundPart:FindFirstAncestorOfClass("Model")
+            if not killer then return end
+            local hrp = killer:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+
+            local dist = (hrp.Position - root.Position).Magnitude
+            if dist > Config.DetectionRange then return end
+            if not isFacing(root, hrp, killer.Name) then return end
+
+            fireBlock()
+            blockLastTime = tick()
+
+            if Config.AutoPunchOn then
+                task.delay(Config.AutoPunchDelay, firePunch)
+            end
+            soundBlockedUntil[sound] = tick() + 0.5
+        end
+    end)
+
+    local pp = sound:GetPropertyChangedSignal("IsPlaying"):Connect(function()
+        if sound.IsPlaying and Config.AutoBlockOn and Config.BlockMode ~= "Animation" and Config.BlockMode ~= "Hitbox" then
+            -- Same logic as above
+            local now = tick()
+            if soundBlockedUntil[sound] and now < soundBlockedUntil[sound] then return end
+            -- ... (same as above)
+        end
+    end)
+
+    local dc
+    dc = sound.Destroying:Connect(function()
+        pcall(function() pc:Disconnect(); pp:Disconnect(); dc:Disconnect() end)
+        hookedSounds[sound] = nil
+        soundBlockedUntil[sound] = nil
+    end)
+
+    hookedSounds[sound] = {pc, pp, dc}
+end
+
+-- Hook existing and future sounds in Killers folder
+task.spawn(function()
+    local pf = Workspace:FindFirstChild("Players")
+    if not pf then pf = Workspace:WaitForChild("Players", 30) end
+    if not pf then return end
+    local kf = pf:FindFirstChild("Killers")
+    if not kf then kf = pf:WaitForChild("Killers", 30) end
+    if not kf then return end
+
+    for _, killer in pairs(kf:GetChildren()) do
+        for _, d in pairs(killer:GetDescendants()) do
+            if d:IsA("Sound") then pcall(hookSound, d) end
+        end
+    end
+    kf.DescendantAdded:Connect(function(d)
+        if d:IsA("Sound") then pcall(hookSound, d) end
+    end)
+end)
+
+-- ==========================================
+-- Hitbox Auto-Block (Fartsaken-style predictive)
+-- ==========================================
+local function tryBlockFromHitbox(hb)
+    if not Config.HitboxEnabled or not Config.AutoBlockOn then return end
+    if not hb or not hb:IsA("BasePart") then return end
+    local sz = hb.Size
+    if math.abs(sz.X - Config.HitboxSize.X) > Config.HitboxMargin
+    or math.abs(sz.Y - Config.HitboxSize.Y) > Config.HitboxMargin
+    or math.abs(sz.Z - Config.HitboxSize.Z) > Config.HitboxMargin then return end
+
+    local kf = getKillersFolder()
+    if not kf then return end
+    local killerModel = nil
+    for _, km in ipairs(kf:GetChildren()) do
+        if hb.Name == km.Name or hb.Name:sub(1, #km.Name) == km.Name then
+            killerModel = km
+            break
+        end
+    end
+    if not killerModel then return end
+
+    local myRoot = cachedHRP
+    if not myRoot then return end
+    local dist = (hb.Position - myRoot.Position).Magnitude
+    if dist > Config.HitboxRange then return end
+
+    local hrp = killerModel:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if not isFacing(myRoot, hrp, killerModel.Name) then return end
+
+    local now = tick()
+    if now - blockLastTime < BLOCK_CD then return end
+    blockLastTime = now
+
+    local function doBlock()
+        fireBlock()
+        if Config.DoubleBlock then
+            task.wait(0.05)
+            firePunch()
+        end
+    end
+    if Config.AnimBlockDelay > 0 then
+        task.delay(Config.AnimBlockDelay, doBlock)
+    else
+        doBlock()
+    end
+end
+
+local function setupHitboxBlock()
+    if hitboxConn then hitboxConn:Disconnect(); hitboxConn = nil end
+    if hitboxHeartbeat then hitboxHeartbeat:Disconnect(); hitboxHeartbeat = nil end
+    if not Config.HitboxEnabled or not Config.AutoBlockOn then return end
+
+    local folder = Workspace:FindFirstChild("Hitboxes")
+    if not folder then
+        folder = Workspace:WaitForChild("Hitboxes", 10)
+        if not folder then return end
+    end
+
+    for _, hb in ipairs(folder:GetChildren()) do
+        task.spawn(tryBlockFromHitbox, hb)
+    end
+    hitboxConn = folder.ChildAdded:Connect(tryBlockFromHitbox)
+
+    hitboxHeartbeat = RunService.Heartbeat:Connect(function()
+        if not Config.HitboxEnabled or not Config.AutoBlockOn then return end
+        if not folder or not folder.Parent then return end
+        local myRoot = cachedHRP
+        if not myRoot then return end
+
+        for _, hb in ipairs(folder:GetChildren()) do
+            if hb:IsA("BasePart") then
+                local sz = hb.Size
+                if math.abs(sz.X - Config.HitboxSize.X) <= Config.HitboxMargin
+                and math.abs(sz.Y - Config.HitboxSize.Y) <= Config.HitboxMargin
+                and math.abs(sz.Z - Config.HitboxSize.Z) <= Config.HitboxMargin then
+                    local dist = (hb.Position - myRoot.Position).Magnitude
+                    if dist <= Config.HitboxRange then
+                        local now = tick()
+                        if now - blockLastTime >= BLOCK_CD then
+                            blockLastTime = now
+                            local function doBlock()
+                                fireBlock()
+                                if Config.DoubleBlock then
+                                    task.wait(0.05)
+                                    firePunch()
+                                end
+                            end
+                            if Config.AnimBlockDelay > 0 then
+                                task.delay(Config.AnimBlockDelay, doBlock)
+                            else
+                                doBlock()
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- ==========================================
+-- WINDUI
+-- ==========================================
+local Window = WindUI:CreateWindow({
+    Title = "Hybrid Auto Block",
+    Icon = "shield",
+    Author = "By_ᴹìɮì",
+    Folder = "HybridAB",
+    Size = UDim2.fromOffset(520, 480),
+    Transparent = true,
+    Theme = "Dark",
+    SideBarWidth = 150,
+    HideSearchBar = true,
+    ScrollBarEnabled = false,
+})
+
+local MainTab = Window:Tab({ Title = "Auto Block", Icon = "shield" })
+local AdvTab  = Window:Tab({ Title = "Advanced",   Icon = "zap" })
+
+-- ==========================================
+-- Main Tab — Core Block
+-- ==========================================
+local CoreSec = MainTab:Section({ Title = "Core Block", Opened = true })
+
+CoreSec:Toggle({
+    Title = "Enable Auto Block",
+    Default = false,
+    Callback = function(v)
+        Config.AutoBlockOn = v
+        if v then
+            setupAnimBlock()
+            setupHitboxBlock()
+        end
+    end,
+})
+
+CoreSec:Dropdown({
+    Title = "Block Mode",
+    Values = { "Hybrid", "Animation", "Sound", "Hitbox" },
+    Value = "Hybrid",
+    Multi = false,
+    Callback = function(v)
+        Config.BlockMode = v
+        if Config.AutoBlockOn then
+            setupAnimBlock()
+            setupHitboxBlock()
+        end
+    end,
+})
+
+CoreSec:Slider({
+    Title = "Detection Range",
+    Step = 1,
+    Value = { Min = 5, Max = 30, Default = Config.DetectionRange },
+    Callback = function(v) Config.DetectionRange = v end,
+})
+
+CoreSec:Toggle({
+    Title = "Verify Facing",
+    Default = Config.VerifyFacing,
+    Callback = function(v) Config.VerifyFacing = v end,
+})
+
+CoreSec:Slider({
+    Title = "Facing Dot",
+    Step = 0.05,
+    Value = { Min = -1, Max = 1, Default = Config.FacingDot },
+    Callback = function(v) Config.FacingDot = v end,
+})
+
+CoreSec:Slider({
+    Title = "Block Delay (s)",
+    Step = 0.05,
+    Value = { Min = 0, Max = 1, Default = Config.BlockDelay },
+    Callback = function(v) Config.BlockDelay = v end,
+})
+
+CoreSec:Slider({
+    Title = "Block Cooldown (s)",
+    Step = 0.05,
+    Value = { Min = 0.05, Max = 1, Default = Config.BlockCooldown },
+    Callback = function(v) Config.BlockCooldown = v end,
+})
+
+CoreSec:Toggle({
+    Title = "Double Block (Block + Punch)",
+    Default = Config.DoubleBlock,
+    Callback = function(v) Config.DoubleBlock = v end,
+})
+
+-- ==========================================
+-- Main Tab — Auto Punch
+-- ==========================================
+local PunchSec = MainTab:Section({ Title = "Auto Punch", Opened = true })
+
+PunchSec:Toggle({
+    Title = "Enable Auto Punch",
+    Default = false,
+    Callback = function(v) Config.AutoPunchOn = v end,
+})
+
+PunchSec:Slider({
+    Title = "Auto Punch Delay (s)",
+    Step = 0.05,
+    Value = { Min = 0, Max = 1, Default = Config.AutoPunchDelay },
+    Callback = function(v) Config.AutoPunchDelay = v end,
+})
+
+-- ==========================================
+-- Advanced Tab — Animation
+-- ==========================================
+local AnimSec = AdvTab:Section({ Title = "Animation Detection", Opened = true })
+
+AnimSec:Toggle({
+    Title = "Enable Animation AB",
+    Default = true,
+    Callback = function(v)
+        Config.AnimEnabled = v
+        if Config.AutoBlockOn then setupAnimBlock() end
+    end,
+})
+
+AnimSec:Slider({
+    Title = "Animation Range",
+    Step = 1,
+    Value = { Min = 5, Max = 30, Default = Config.AnimRange },
+    Callback = function(v) Config.AnimRange = v end,
+})
+
+AnimSec:Slider({
+    Title = "Animation Block Delay",
+    Step = 0.05,
+    Value = { Min = 0, Max = 1, Default = Config.AnimBlockDelay },
+    Callback = function(v) Config.AnimBlockDelay = v end,
+})
+
+-- ==========================================
+-- Advanced Tab — Hitbox (Fartsaken)
+-- ==========================================
+local HitSec = AdvTab:Section({ Title = "Hitbox Detection (Fartsaken)", Opened = true })
+
+HitSec:Toggle({
+    Title = "Enable Hitbox AB",
+    Default = true,
+    Callback = function(v)
+        Config.HitboxEnabled = v
+        if Config.AutoBlockOn then setupHitboxBlock() end
+    end,
+})
+
+HitSec:Slider({
+    Title = "Hitbox Range",
+    Step = 1,
+    Value = { Min = 5, Max = 40, Default = Config.HitboxRange },
+    Callback = function(v) Config.HitboxRange = v end,
+})
+
+-- ==========================================
+-- Boot
+-- ==========================================
+setupAnimBlock()
+setupHitboxBlock()
+
+print("Hybrid Auto Block loaded.")
