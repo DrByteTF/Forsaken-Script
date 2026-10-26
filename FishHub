@@ -1,4 +1,6 @@
 --[[
+    Fish Hub — WindUI Edition
+    Full feature set: Auto Block, Hitbox, ESP, Stamina, Aimbot, Auto Gen.
     WARNING: Violates Roblox ToS. Use at your own risk.
 ]]
 
@@ -8,28 +10,28 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 -- ==========================================
--- Services & Local Player
+-- Services
 -- ==========================================
 local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
-local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 if not LocalPlayer then
     Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
     LocalPlayer = Players.LocalPlayer
 end
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HttpService = game:GetService("HttpService")
-
 -- ==========================================
--- Buffer Setup (Block)
+-- Zero-Delay Buffer Setup
 -- ==========================================
 local cachedBlockBuffer = nil
+local cachedPayload = nil
+local blockRemote = nil
+local fireServerMethod = nil
+
 pcall(function()
     local blockBytes = { 3, 5, 0, 0, 0, 66, 108, 111, 99, 107 }
     if buffer and buffer.create then
@@ -37,17 +39,32 @@ pcall(function()
         for i = 1, #blockBytes do
             buffer.writeu8(cachedBlockBuffer, i - 1, blockBytes[i])
         end
-    elseif buffer and buffer.fromstring then
-        local str = ""
-        for _, b in ipairs(blockBytes) do
-            str = str .. string.char(b)
-        end
-        cachedBlockBuffer = buffer.fromstring(str)
+    end
+    if cachedBlockBuffer then
+        cachedPayload = { cachedBlockBuffer }
     end
 end)
 
+task.spawn(function()
+    pcall(function()
+        local modules = ReplicatedStorage:FindFirstChild("Modules")
+        if modules then
+            local n1 = modules:FindFirstChild("Network")
+            if n1 then
+                local n2 = n1:FindFirstChild("Network")
+                if n2 then
+                    blockRemote = n2:FindFirstChild("RemoteEvent")
+                    if blockRemote then
+                        fireServerMethod = blockRemote.FireServer
+                    end
+                end
+            end
+        end
+    end)
+end)
+
 -- ==========================================
--- Settings Configuration
+-- Settings
 -- ==========================================
 local Settings = {
     MasterAutoBlock = true,
@@ -55,9 +72,9 @@ local Settings = {
     BlockDelay = 0,
 
     HitboxEnabled = true,
-    BoxSizeWidth = 8,
+    BoxSizeWidth = 9,
     BoxSizeHeight = 7,
-    BoxSizeDepth = 12,
+    BoxSizeDepth = 12.3,
     HitboxDistance = 0.01,
     BoxColor = Color3.fromRGB(0, 255, 0),
     BoxTransparency = 0.5,
@@ -76,67 +93,88 @@ local Settings = {
     AutoGenSpeed = 0.05,
     HidePuzzleUI = true,
 
-    SurvInfStamina = false, SurvEnableMaxStamina = false, SurvMaxStamina = 100,
-    SurvEnableStaminaGain = false, SurvStaminaGain = 10, SurvEnableStaminaLoss = false, SurvStaminaLoss = 5,
-    SurvEnableSprintSpeed = false, SurvSprintSpeed = 16,
+    -- ESP
+    EspKiller = true,
+    EspKillerColor = Color3.fromRGB(255, 0, 0),
+    EspSurvivors = true,
+    EspSurvivorsColor = Color3.fromRGB(0, 170, 255),
+    EspGenerators = true,
+    EspGeneratorsColor = Color3.fromRGB(255, 255, 0),
+    EspBot = true,
+    EspBotColor = Color3.fromRGB(255, 100, 100),
+    EspShadow = true,
+    EspShadowColor = Color3.fromRGB(255, 105, 180),
+    EspItems = true,
+    EspBloxyColor = Color3.fromRGB(255, 255, 255),
+    EspMedkitColor = Color3.fromRGB(170, 0, 255),
+    EspItemsColor = Color3.fromRGB(0, 255, 150),
 
-    KillerInfStamina = false, KillerEnableMaxStamina = false, KillerMaxStamina = 200,
-    KillerEnableStaminaGain = false, KillerStaminaGain = 20, KillerEnableStaminaLoss = false, KillerStaminaLoss = 2,
-    KillerEnableSprintSpeed = false, KillerSprintSpeed = 22
+    -- Survivor Stamina
+    SurvInfStamina = false,
+    SurvEnableMaxStamina = false, SurvMaxStamina = 100,
+    SurvEnableStaminaGain = false, SurvStaminaGain = 20,
+    SurvEnableStaminaLoss = false, SurvStaminaLoss = 10,
+    SurvEnableSprintSpeed = false, SurvSprintSpeed = 26,
+
+    -- Killer Stamina
+    KillerInfStamina = false,
+    KillerEnableMaxStamina = false, KillerMaxStamina = 110,
+    KillerEnableStaminaGain = false, KillerStaminaGain = 21,
+    KillerEnableStaminaLoss = false, KillerStaminaLoss = 9.5,
+    KillerEnableSprintSpeed = false, KillerSprintSpeed = 28,
 }
 
 -- ==========================================
--- Sound IDs & Behead IDs
+-- Sound IDs
 -- ==========================================
 local KillerSounds = {
-    ["94317217837143"]=true,["105840448036441"]=true,["99215225043220"]=true,["108907358619313"]=true,
-    ["107444859834748"]=true,["124903763333174"]=true,["123835423223220"]=true,["112809109188560"]=true,
-    ["123923371062204"]=true,["137809737339569"]=true,["131123355704017"]=true,["98675142200448"]=true,
-    ["109246041199659"]=true,["140242176732868"]=true,["105204810054381"]=true,["80516583309685"]=true,
-    ["128195973631079"]=true,["84307400688050"]=true,["98733709078792"]=true,["124234993291213"]=true,
-    ["82221759983649"]=true,["75330693422988"]=true,["117173212095661"]=true,["74809026448465"]=true,
-    ["119942598489800"]=true,["88589682639517"]=true,["121954639447247"]=true,["128856426573270"]=true,
-    ["85853080745515"]=true,["109348678063422"]=true,["80540530406270"]=true,["131406927389838"]=true,
-    ["128367348686124"]=true,["89004992452376"]=true,["108610718831698"]=true,["109570290393196"]=true,
-    ["96594507550917"]=true,["125213046326879"]=true,["79980897195554"]=true,["93299090238530"]=true,
-    ["138547840635558"]=true,["119664480754070"]=true,["104910828105172"]=true,["116581754553533"]=true,
-    ["92869747208256"]=true,["114742322778642"]=true,["70739368096233"]=true,["96117920303138"]=true,
-    ["135319730390518"]=true,["98742773509325"]=true,["74842815979546"]=true,["127557531826290"]=true,
-    ["108651070773439"]=true,["105516183226360"]=true,["113413858159336"]=true,["105658601731267"]=true,
-    ["84116622032112"]=true,["73662192846371"]=true,["133709029886490"]=true,["79612713897495"]=true,
-    ["94632255644411"]=true,["71805956520207"]=true,["139996647355899"]=true,["77649238882198"]=true,
-    ["115678417928765"]=true,["119583605486352"]=true,["118562842802948"]=true,["132581672170205"]=true,
-}
-
-local SoundCustomConfig = {
-    ["119583605486352"] = { instantCloseRange = true, maxDistance = 11, visibleTime = 0.3 },
+    ["119583605486352"] = { name = "Sixer_M1_Fast", priority = 10, instantClose = 11 },
+    ["94317217837143"] = true, ["105840448036441"] = true, ["99215225043220"] = true, ["108907358619313"] = true,
+    ["107444859834748"] = true, ["124903763333174"] = true, ["123835423223220"] = true, ["112809109188560"] = true,
+    ["123923371062204"] = true, ["137809737339569"] = true, ["131123355704017"] = true, ["98675142200448"] = true,
+    ["109246041199659"] = true, ["140242176732868"] = true, ["105204810054381"] = true, ["80516583309685"] = true,
+    ["128195973631079"] = true, ["84307400688050"] = true, ["98733709078792"] = true, ["124234993291213"] = true,
+    ["82221759983649"] = true, ["75330693422988"] = true, ["117173212095661"] = true, ["74809026448465"] = true,
+    ["119942598489800"] = true, ["88589682639517"] = true, ["121954639447247"] = true, ["128856426573270"] = true,
+    ["85853080745515"] = true, ["109348678063422"] = true, ["80540530406270"] = true, ["131406927389838"] = true,
+    ["128367348686124"] = true, ["89004992452376"] = true, ["108610718831698"] = true, ["109570290393196"] = true,
+    ["96594507550917"] = true, ["125213046326879"] = true, ["79980897195554"] = true, ["93299090238530"] = true,
+    ["138547840635558"] = true, ["119664480754070"] = true, ["104910828105172"] = true, ["116581754553533"] = true,
+    ["92869747208256"] = true, ["114742322778642"] = true, ["70739368096233"] = true, ["96117920303138"] = true,
+    ["135319730390518"] = true, ["98742773509325"] = true, ["74842815979546"] = true, ["127557531826290"] = true,
+    ["108651070773439"] = true, ["105516183226360"] = true, ["113413858159336"] = true, ["105658601731267"] = true,
+    ["84116622032112"] = true, ["73662192846371"] = true, ["133709029886490"] = true, ["79612713897495"] = true,
+    ["94632255644411"] = true, ["71805956520207"] = true, ["139996647355899"] = true, ["77649238882198"] = true,
+    ["115678417928765"] = true, ["118562842802948"] = true, ["132581672170205"] = true,
 }
 
 local BeheadIDs = {
-    ["86566726496558"]=true,["126727756047566"]=true,["126355327951215"]=true,
-    ["82113744478546"]=true,["126681776859538"]=true,["116250166603410"]=true,
-    ["89182710199063"]=true,
+    ["86566726496558"] = true, ["126727756047566"] = true, ["126355327951215"] = true,
+    ["82113744478546"] = true, ["126681776859538"] = true, ["116250166603410"] = true,
+    ["89182710199063"] = true,
 }
 
 local KillerNamesList = {
-    ["azure"]=true,["nosferatu"]=true,["sixer"]=true,["1x1x1x1"]=true,
-    ["noli"]=true,["johndoe"]=true,["c00lkidd"]=true,["slasher"]=true
+    ["azure"] = true, ["nosferatu"] = true, ["sixer"] = true, ["1x1x1x1"] = true,
+    ["noli"] = true, ["johndoe"] = true, ["c00lkidd"] = true, ["slasher"] = true
+}
+
+local SurvivorNamesList = {
+    ["guest 1337"] = true, ["chance"] = true, ["veeronica"] = true, ["dusckkar"] = true,
+    ["taph"] = true, ["two time"] = true, ["007n7"] = true, ["builderman"] = true,
+    ["jane doe"] = true, ["noob"] = true, ["elliot"] = true, ["shedletsky"] = true
 }
 
 -- ==========================================
 -- Helper Functions
 -- ==========================================
-local function extractSoundId(soundIdUrl)
-    if not soundIdUrl or soundIdUrl == "" then return nil end
-    return string.match(soundIdUrl, "(%d+)$")
-end
-
 local function isInLobby(obj)
     if not obj then return false end
     local current = obj
     while current and current ~= Workspace do
         local name = string.lower(current.Name)
-        if string.find(name, "lobby") or string.find(name, "waiting") or string.find(name, "menu") or string.find(name, "room") then
+        if string.find(name, "lobby") or string.find(name, "waiting")
+            or string.find(name, "menu") or string.find(name, "room") then
             return true
         end
         current = current.Parent
@@ -144,36 +182,29 @@ local function isInLobby(obj)
     return false
 end
 
-local Stats = game:GetService("Stats")
-local cachedNetworkEvent = nil
-
 local function getNearestKiller(maxRange)
     local character = LocalPlayer.Character
     if not character then return nil end
     local myHRP = character:FindFirstChild("HumanoidRootPart")
     if not myHRP then return nil end
 
-    local nearest = nil
-    local nearestDistance = maxRange or Settings.AimbotRange or 40
+    local nearest, nearestDistance = nil, maxRange or Settings.AimbotRange or 40
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
             local targetChar = player.Character
             local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
             local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+
             if targetHRP and humanoid and humanoid.Health > 0 and not isInLobby(targetChar) then
                 local charName = string.lower(targetChar.Name)
                 local playerName = string.lower(player.Name)
                 local isKiller = false
-                if KillerNamesList then
-                    for kName in pairs(KillerNamesList) do
-                        if string.find(charName, kName) or string.find(playerName, kName) then
-                            isKiller = true
-                            break
-                        end
+                for kName in pairs(KillerNamesList) do
+                    if string.find(charName, kName) or string.find(playerName, kName) then
+                        isKiller = true
+                        break
                     end
-                else
-                    isKiller = true
                 end
                 if isKiller then
                     local distance = (targetHRP.Position - myHRP.Position).Magnitude
@@ -189,18 +220,283 @@ local function getNearestKiller(maxRange)
 end
 
 -- ==========================================
--- Aimbot Logic
+-- ESP System (Fish Hub)
+-- ==========================================
+local trackedESP = {}
+
+local ESPCategories = {
+    ["Killer"] = { ConfigKey = "EspKiller", ColorKey = "EspKillerColor" },
+    ["Survivors"] = { ConfigKey = "EspSurvivors", ColorKey = "EspSurvivorsColor" },
+    ["Generators"] = { ConfigKey = "EspGenerators", ColorKey = "EspGeneratorsColor" },
+    ["Bot"] = { ConfigKey = "EspBot", ColorKey = "EspBotColor" },
+    ["Shadow"] = { ConfigKey = "EspShadow", ColorKey = "EspShadowColor" },
+    ["BloxyCola"] = { ConfigKey = "EspItems", ColorKey = "EspBloxyColor" },
+    ["Medkit"] = { ConfigKey = "EspItems", ColorKey = "EspMedkitColor" },
+    ["DigitalFootprint"] = { ConfigKey = "EspItems", ColorKey = "EspItemsColor" }
+}
+
+local function isFakeGenerator(obj)
+    if not obj then return false end
+    local name = string.lower(obj.Name)
+    return string.find(name, "fake") ~= nil or string.find(name, "decoy") ~= nil
+end
+
+local function isCollectibleItem(obj)
+    if not obj then return false end
+    return obj:IsA("Tool") or obj:IsA("Model") or obj:IsA("BasePart")
+end
+
+local function isJohnDoeActive()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character and string.find(string.lower(player.Character.Name), "johndoe") then
+            return true
+        end
+    end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") then
+            if string.find(string.lower(obj.Name), "johndoe") then return true end
+        end
+    end
+    return false
+end
+
+local function classifyESPObject(obj)
+    if not obj or not obj.Parent then return nil end
+    if isInLobby(obj) then return nil end
+    if not (obj:IsA("Model") or obj:IsA("Tool") or obj:IsA("BasePart")) then return nil end
+
+    if LocalPlayer.Character and (obj == LocalPlayer.Character or obj:IsDescendantOf(LocalPlayer.Character)) then return nil end
+    if obj:IsA("Model") and Players:GetPlayerFromCharacter(obj) == LocalPlayer then return nil end
+    if isFakeGenerator(obj) then return nil end
+
+    local name = string.lower(obj.Name)
+
+    -- Bots / Minions
+    if obj:IsA("Model") then
+        local explicitBots = {"minimon", "minion", "bot", "puppet", "1x1x1x1zombie", "servant"}
+        for _, bName in ipairs(explicitBots) do
+            if string.find(name, bName, 1, true) then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                local isPlayer = Players:GetPlayerFromCharacter(obj) ~= nil
+                if hum and not isPlayer then return "Bot" end
+            end
+        end
+    end
+
+    -- Shadow (John Doe)
+    if obj:IsA("BasePart") or obj:IsA("Model") then
+        if string.find(name, "shadow", 1, true) then
+            if isJohnDoeActive() then return "Shadow" end
+            return nil
+        end
+    end
+
+    -- Killer / Survivor
+    if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and obj:FindFirstChild("HumanoidRootPart") then
+        local player = Players:GetPlayerFromCharacter(obj)
+
+        for killerName in pairs(KillerNamesList) do
+            if string.find(name, killerName, 1, true) then return "Killer" end
+        end
+        if string.find(name, "killer", 1, true) then return "Killer" end
+
+        if not player then
+            local botKeywords = {"summon", "decoy", "helper", "harp", "guitar",
+                "pizzadeliveryrig", "blue", "green", "purple", "red", "mafia", "corrupt"}
+            for _, keyword in ipairs(botKeywords) do
+                if string.find(name, keyword, 1, true) then return "Bot" end
+            end
+        end
+
+        if player and player ~= LocalPlayer then return "Survivors" end
+
+        for survivorName in pairs(SurvivorNamesList) do
+            if string.find(name, survivorName, 1, true) then return "Survivors" end
+        end
+        if string.find(name, "survivor", 1, true) then return "Survivors" end
+
+        return nil
+    end
+
+    -- Generators
+    if string.find(name, "generator", 1, true) then
+        if isFakeGenerator(obj) then return nil end
+        return "Generators"
+    end
+
+    -- Items
+    if name == "bloxycola" or name == "bloxy cola" then
+        if isCollectibleItem(obj) then return "BloxyCola" end
+        return nil
+    end
+    if name == "medkit" or name == "med kit" then
+        if isCollectibleItem(obj) then return "Medkit" end
+        return nil
+    end
+    if name == "digital footprint" or name == "digitalfootprint" then
+        return "DigitalFootprint"
+    end
+
+    return nil
+end
+
+local function getGeneratorProgressNumeric(genObj)
+    if not genObj then return 0 end
+    local currentVal = 0
+
+    for _, attrName in ipairs({"Progress", "Percent", "State", "Completed", "Repair"}) do
+        local attr = genObj:GetAttribute(attrName)
+        if type(attr) == "number" then
+            currentVal = attr
+            break
+        end
+    end
+
+    if currentVal == 0 then
+        local valObj = genObj:FindFirstChild("Progress", true)
+            or genObj:FindFirstChild("Value", true)
+            or genObj:FindFirstChild("Percent", true)
+        if valObj and (valObj:IsA("NumberValue") or valObj:IsA("IntValue")) then
+            currentVal = valObj.Value
+        end
+    end
+    return currentVal
+end
+
+local function updateSingleESP(obj, catKey)
+    if not obj or not obj.Parent or isInLobby(obj) or isFakeGenerator(obj) then return end
+    local info = ESPCategories[catKey]
+    if not info then return end
+
+    local isEnabled = Settings[info.ConfigKey]
+    local color = Settings[info.ColorKey]
+
+    if catKey == "Generators" then
+        local progress = getGeneratorProgressNumeric(obj)
+        local percent = (progress <= 5 and progress > 0) and (progress / 5) or (progress / 100)
+
+        if percent >= 1 or progress == 100 then color = Color3.fromRGB(0, 255, 0)
+        elseif percent >= 0.8 then color = Color3.fromRGB(150, 255, 0)
+        elseif percent >= 0.6 then color = Color3.fromRGB(255, 255, 0)
+        elseif percent >= 0.4 then color = Color3.fromRGB(255, 170, 0)
+        elseif percent >= 0.2 then color = Color3.fromRGB(255, 85, 0)
+        else color = Color3.fromRGB(255, 0, 0) end
+    end
+
+    local highlight = obj:FindFirstChild("FishHighlight")
+    if isEnabled then
+        if not highlight then
+            highlight = Instance.new("Highlight")
+            highlight.Name = "FishHighlight"
+            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            highlight.FillTransparency = 0.5
+            highlight.OutlineTransparency = 0
+            highlight.Parent = obj
+        end
+        highlight.FillColor = color
+        highlight.OutlineColor = color
+        highlight.Enabled = true
+    else
+        if highlight then highlight.Enabled = false end
+    end
+end
+
+local function refreshAllESP()
+    for obj, catKey in pairs(trackedESP) do
+        if isFakeGenerator(obj) then
+            if obj and obj:FindFirstChild("FishHighlight") then obj.FishHighlight:Destroy() end
+            trackedESP[obj] = nil
+        else
+            local isSelf = false
+            if LocalPlayer.Character and (obj == LocalPlayer.Character or obj:IsDescendantOf(LocalPlayer.Character)) then
+                isSelf = true
+            end
+            if obj and obj:IsA("Model") and Players:GetPlayerFromCharacter(obj) == LocalPlayer then
+                isSelf = true
+            end
+
+            local isDead = false
+            if catKey == "Survivors" or catKey == "Killer" or catKey == "Bot" then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health <= 0 then isDead = true end
+            end
+
+            if obj and obj.Parent and not isInLobby(obj) and not isSelf and not isDead then
+                updateSingleESP(obj, catKey)
+            else
+                if obj and obj:FindFirstChild("FishHighlight") then obj.FishHighlight:Destroy() end
+                if isDead or not obj or not obj.Parent then trackedESP[obj] = nil end
+            end
+        end
+    end
+end
+
+local function registerESPObject(obj)
+    if not obj or not obj.Parent then return end
+    if isInLobby(obj) or isFakeGenerator(obj) then return end
+
+    local catKey = classifyESPObject(obj)
+    if not catKey then return end
+
+    local currentParent = obj.Parent
+    local isNested = false
+    while currentParent and currentParent ~= Workspace do
+        if isFakeGenerator(currentParent) then return end
+        if trackedESP[currentParent] then isNested = true; break end
+        currentParent = currentParent.Parent
+    end
+
+    if not isNested or catKey == "Bot" or catKey == "Shadow" then
+        trackedESP[obj] = catKey
+        updateSingleESP(obj, catKey)
+    end
+end
+
+task.spawn(function()
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        registerESPObject(obj)
+    end
+    Workspace.DescendantAdded:Connect(function(obj)
+        task.wait(0.1)
+        registerESPObject(obj)
+    end)
+    while task.wait(0.5) do
+        refreshAllESP()
+    end
+end)
+
+local function forceRegisterPlayerESP(player)
+    if player.Character then
+        task.spawn(function()
+            task.wait(0.5)
+            registerESPObject(player.Character)
+        end)
+    end
+    player.CharacterAdded:Connect(function(char)
+        task.spawn(function()
+            task.wait(0.5)
+            registerESPObject(char)
+        end)
+    end)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    forceRegisterPlayerESP(player)
+end
+Players.PlayerAdded:Connect(forceRegisterPlayerESP)
+
+-- ==========================================
+-- Aimbot Core
 -- ==========================================
 local hookedAimbotButtons = {}
 local activeAimbotLoop = nil
 
 local KillerSkillButtons = {
-    ["Perforating"]=true,["Lacerate"]=true,["Carving Slash"]=true,
-    ["Stab"]=true,["Slash"]=true,["Punch"]=true
+    ["Perforating"] = true, ["Lacerate"] = true, ["Carving Slash"] = true,
+    ["Stab"] = true, ["Slash"] = true, ["Punch"] = true
 }
-
 local SurvivorSkillButtons = {
-    ["Slash"]=true,["Hatchet"]=true,["Punch"]=true,["One Shot"]=true
+    ["Slash"] = true, ["Hatchet"] = true, ["Punch"] = true, ["One Shot"] = true
 }
 
 local function startAimbot(target, duration)
@@ -218,6 +514,7 @@ local function startAimbot(target, duration)
             if activeAimbotLoop then activeAimbotLoop:Disconnect(); activeAimbotLoop = nil end
             return
         end
+
         local HRP = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         local camera = Workspace.CurrentCamera
         if not HRP or not camera then return end
@@ -225,54 +522,54 @@ local function startAimbot(target, duration)
         local myPos = HRP.Position
         local targetPos = target.Position
         local dist = (targetPos - myPos).Magnitude
+        local currentLook = target.CFrame.LookVector
         local predictedPosition = targetPos
 
-        if dist > 10 then
-            local targetVel = target.AssemblyLinearVelocity or Vector3.new(0,0,0)
+        if dist > 8 then
+            local targetVel = target.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
             local flatVel = Vector3.new(targetVel.X, 0, targetVel.Z)
-            local currentLook = target.CFrame.LookVector
             local flatLook = Vector3.new(currentLook.X, 0, currentLook.Z).Unit
             local toPlayerDir = (myPos - targetPos).Unit
             local moveDir = (flatVel.Magnitude > 1.5) and flatVel.Unit or flatLook
             local isApproachingStraight = moveDir:Dot(toPlayerDir) > 0.82
             local turnDot = lastLookVector:Dot(currentLook)
-            local isTurning = turnDot < 0.985
-            if not isApproachingStraight and (flatVel.Magnitude > 2 or isTurning) then
-                local predictOffset = flatVel * prediction
+            local angularVelY = math.abs(target.AssemblyAngularVelocity.Y)
+            local isTurning = (turnDot < 0.9995) or (angularVelY > 0.3)
+
+            if not isApproachingStraight then
                 if isTurning then
-                    predictOffset = predictOffset + (flatLook * (prediction * 6))
+                    local turnPredict = flatLook * (prediction * 14)
+                    local velPredict = flatVel * prediction
+                    predictedPosition = targetPos + turnPredict + velPredict
+                elseif flatVel.Magnitude > 2 then
+                    predictedPosition = targetPos + (flatVel * prediction)
                 end
-                predictedPosition = targetPos + predictOffset
             end
-            lastLookVector = currentLook
         end
+
+        lastLookVector = currentLook
 
         local targetCameraCFrame = CFrame.new(camera.CFrame.Position, predictedPosition)
         camera.CFrame = camera.CFrame:Lerp(targetCameraCFrame, aimSpeed)
+
         local targetHRPCFrame = CFrame.new(HRP.Position, Vector3.new(predictedPosition.X, HRP.Position.Y, predictedPosition.Z))
         HRP.CFrame = HRP.CFrame:Lerp(targetHRPCFrame, aimSpeed)
     end)
 end
 
 -- ==========================================
--- Remote Auto Block
+-- Zero-Delay Block
 -- ==========================================
-local blockRemote = nil
-task.spawn(function()
-    local modules = ReplicatedStorage:WaitForChild("Modules", 5)
-    local network1 = modules and modules:WaitForChild("Network", 5)
-    local network2 = network1 and network1:WaitForChild("Network", 5)
-    blockRemote = network2 and network2:WaitForChild("RemoteEvent", 5)
-end)
-
 local lastBlockTime = 0
 
-local function performBlock()
-    if not Settings.MasterAutoBlock or not blockRemote or not cachedBlockBuffer then return end
-    local now = os.clock()
-    if now - lastBlockTime < 0.01 then return end
-    lastBlockTime = now
-    blockRemote:FireServer("UseActorAbility", { cachedBlockBuffer })
+local function performBlockInstant()
+    if not Settings.MasterAutoBlock or not fireServerMethod or not cachedPayload then return end
+    task.spawn(function()
+        pcall(function()
+            fireServerMethod(blockRemote, "UseActorAbility", cachedPayload)
+        end)
+    end)
+    lastBlockTime = os.clock()
 end
 
 -- ==========================================
@@ -298,7 +595,7 @@ local function setupAimbotButton(button)
     button.MouseButton1Click:Connect(triggerAimbot)
 end
 
-local function scanForSkillButtons()
+task.spawn(function()
     local pGui = LocalPlayer:WaitForChild("PlayerGui", 10)
     if not pGui then return end
     local function checkAndHook(gui)
@@ -308,11 +605,10 @@ local function scanForSkillButtons()
     end
     for _, gui in ipairs(pGui:GetDescendants()) do checkAndHook(gui) end
     pGui.DescendantAdded:Connect(checkAndHook)
-end
-task.spawn(scanForSkillButtons)
+end)
 
 -- ==========================================
--- Behead Skill Detector
+-- Behead Detector
 -- ==========================================
 local currentlyBeheading = {}
 local activeHitboxes = {}
@@ -329,28 +625,11 @@ end
 
 local function isBeheadSkill(character)
     if not Settings.IgnoreBehead or not character then return false end
-    if character:FindFirstChild("BeheadAbility") then return true end
     if currentlyBeheading[character] then return true end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
-    if animator then
-        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-            if track.Animation then
-                local playId = getAnimId(track.Animation.AnimationId)
-                if playId and BeheadIDs and BeheadIDs[playId] then
-                    currentlyBeheading[character] = true
-                    task.delay(track.Length > 0 and track.Length or 1.5, function() currentlyBeheading[character] = nil end)
-                    return true
-                end
-            end
-        end
-    end
+    if character:FindFirstChild("BeheadAbility") then return true end
     for _, child in ipairs(character:GetChildren()) do
-        if string.find(string.lower(child.Name), "behead") then
-            currentlyBeheading[character] = true
-            task.delay(1.5, function() currentlyBeheading[character] = nil end)
-            return true
-        end
+        local childName = string.lower(child.Name)
+        if childName == "behead" or string.find(childName, "behead_") then return true end
     end
     return false
 end
@@ -364,10 +643,12 @@ local function hookCharacterAnimations(character)
             if not Settings.IgnoreBehead then return end
             if track.Animation then
                 local playId = getAnimId(track.Animation.AnimationId)
-                if playId and BeheadIDs and BeheadIDs[playId] then
+                if playId and BeheadIDs[playId] then
                     currentlyBeheading[character] = true
                     killHitboxImmediately(character)
-                    task.delay(track.Length > 0 and track.Length or 2, function() currentlyBeheading[character] = nil end)
+                    task.delay(track.Length > 0 and track.Length or 2.5, function()
+                        currentlyBeheading[character] = nil
+                    end)
                 end
             end
         end)
@@ -383,46 +664,7 @@ Players.PlayerAdded:Connect(function(player)
 end)
 
 -- ==========================================
--- Hitbox Object Pool
--- ==========================================
-local HitboxPool = {}
-local function initHitboxPool()
-    for i = 1, 15 do
-        local box = Instance.new("Part")
-        box.Name = "Fast_Predict_Box_" .. i
-        box.Size = Vector3.new(Settings.BoxSizeWidth, Settings.BoxSizeHeight, Settings.BoxSizeDepth)
-        box.Color = Settings.BoxColor
-        box.Transparency = 1
-        box.Material = Settings.GlowMode and Enum.Material.Neon or Enum.Material.SmoothPlastic
-        box.CanCollide, box.CanQuery, box.Massless, box.Anchored = false, false, true, true
-        box.CFrame = CFrame.new(0, 99999, 0)
-        box.Parent = Workspace
-        table.insert(HitboxPool, {Part = box, InUse = false})
-    end
-end
-task.spawn(initHitboxPool)
-
-local function getHitboxFromPool()
-    for _, data in ipairs(HitboxPool) do
-        if not data.InUse then
-            data.InUse = true
-            data.Part.Color = Settings.BoxColor
-            return data
-        end
-    end
-    return nil
-end
-
-local function releaseHitbox(boxData)
-    if boxData and boxData.Part then
-        boxData.InUse = false
-        boxData.Part.Transparency = 1
-        boxData.Part.CFrame = CFrame.new(0, 99999, 0)
-    end
-end
-
--- ==========================================
--- Pre-Simulation Hitbox Loop
+-- Hitbox System
 -- ==========================================
 local overlapParams = OverlapParams.new()
 overlapParams.FilterType = Enum.RaycastFilterType.Include
@@ -435,11 +677,17 @@ local function spawnHitboxAndCheck(character, customConfig)
     local activeVisibleTime = (customConfig and customConfig.visibleTime) or Settings.VisibleTime
     local boxSize = Vector3.new(Settings.BoxSizeWidth, Settings.BoxSizeHeight, Settings.BoxSizeDepth)
     local forwardOffset = - (Settings.BoxSizeDepth / 2) - Settings.HitboxDistance
-    local boxData = getHitboxFromPool()
-    if not boxData then return end
-    local box = boxData.Part
-    activeHitboxes[character] = boxData
+
+    local box = Instance.new("Part")
+    box.Name = "Fast_Predict_Box"
     box.Size = boxSize
+    box.Color = Settings.BoxColor
+    box.Transparency = Settings.HitboxEnabled and Settings.BoxTransparency or 1
+    box.Material = Settings.GlowMode and Enum.Material.Neon or Enum.Material.SmoothPlastic
+    box.CanCollide, box.CanQuery, box.Massless, box.Anchored = false, false, true, true
+    box.CFrame = hrp.CFrame * CFrame.new(0, 0, forwardOffset)
+    box.Parent = Workspace
+    activeHitboxes[character] = box
 
     local startTime = os.clock()
     local hasTriggeredBlock = false
@@ -447,7 +695,7 @@ local function spawnHitboxAndCheck(character, customConfig)
     hitboxConnections[character] = RunService.Stepped:Connect(function()
         local timeAlive = os.clock() - startTime
         if timeAlive > activeVisibleTime or currentlyBeheading[character] or isBeheadSkill(character) then
-            releaseHitbox(boxData)
+            if box then box:Destroy() end
             activeHitboxes[character] = nil
             hitboxConnections[character]:Disconnect()
             hitboxConnections[character] = nil
@@ -455,6 +703,7 @@ local function spawnHitboxAndCheck(character, customConfig)
         end
         if hrp then box.CFrame = hrp.CFrame * CFrame.new(0, 0, forwardOffset) end
         box.Transparency = Settings.HitboxEnabled and Settings.BoxTransparency or 1
+
         if character ~= LocalPlayer.Character and Settings.MasterAutoBlock and not hasTriggeredBlock then
             local currentMyChar = LocalPlayer.Character
             if currentMyChar then
@@ -463,7 +712,7 @@ local function spawnHitboxAndCheck(character, customConfig)
                 if #partsInBox > 0 then
                     hasTriggeredBlock = true
                     box.Color = Color3.fromRGB(255, 0, 0)
-                    performBlock()
+                    performBlockInstant()
                 end
             end
         end
@@ -471,14 +720,14 @@ local function spawnHitboxAndCheck(character, customConfig)
 end
 
 -- ==========================================
--- Zero-Delay Math Injection Check
+-- Sound Detection
 -- ==========================================
 local hookedSounds = {}
-local soundDataCache = setmetatable({}, { __mode = "k" })
+local soundCache = setmetatable({}, {__mode = "k"})
 
 local IgnoredKeywords = {
-    "behead","pizza delivery","pizza delivery bot","bot",
-    "corrupt nature","corruptnature","minion","clone"
+    "behead", "pizza delivery", "pizza delivery bot", "bot",
+    "corrupt nature", "corruptnature", "minion"
 }
 
 local function isIgnoredSoundSource(sound)
@@ -502,80 +751,58 @@ local function setupSound(sound)
     if not sound:IsA("Sound") or hookedSounds[sound] then return end
     hookedSounds[sound] = true
 
-    local function refreshSoundCache()
-        local rawId = sound.SoundId
-        if not rawId or rawId == "" then soundDataCache[sound] = nil return end
-        local numId = string.match(rawId, "%d+$")
-        if not numId then soundDataCache[sound] = nil return end
-        if isIgnoredSoundSource(sound) then soundDataCache[sound] = nil return end
-        local isBehead = BeheadIDs and BeheadIDs[numId] == true
-        local isKiller = KillerSounds and KillerSounds[numId] == true
-        if not isKiller or isBehead then soundDataCache[sound] = nil return end
-        soundDataCache[sound] = {
-            numId = numId,
-            character = sound:FindFirstAncestorOfClass("Model"),
-            customConfig = SoundCustomConfig and SoundCustomConfig[numId],
-            lastTriggerTime = 0
-        }
-    end
-
-    refreshSoundCache()
-    sound:GetPropertyChangedSignal("SoundId"):Connect(refreshSoundCache)
-    sound:GetPropertyChangedSignal("Parent"):Connect(refreshSoundCache)
-
-    local function onSoundTriggered()
+    local function onSoundEvent()
         if not Settings.AutoBlockSound then return end
         if isIgnoredSoundSource(sound) then return end
-        local cache = soundDataCache[sound]
-        if not cache then return end
-        local currentTime = os.clock()
-        if currentTime - cache.lastTriggerTime < 0.05 then return end
-        cache.lastTriggerTime = currentTime
-        local character = cache.character or sound:FindFirstAncestorOfClass("Model")
-        if not character or isBeheadSkill(character) then return end
-        if not cache.character then cache.character = character end
 
-        if character ~= LocalPlayer.Character and Settings.MasterAutoBlock then
-            local myChar = LocalPlayer.Character
-            local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-            local hrp = character:FindFirstChild("HumanoidRootPart")
-            if myHRP and hrp then
+        local rawId = sound.SoundId
+        if not rawId or rawId == "" then return end
+        local numId = string.match(rawId, "%d+$")
+        if not numId then return end
+        if BeheadIDs[numId] then return end
+        if not KillerSounds[numId] then return end
+
+        local cache = soundCache[sound]
+        if cache and (os.clock() - cache.lastTime) < 0.05 then return end
+        soundCache[sound] = {lastTime = os.clock()}
+
+        local character = sound:FindFirstAncestorOfClass("Model")
+        if not character or isBeheadSkill(character) then return end
+        if character == LocalPlayer.Character then return end
+
+        local myChar = LocalPlayer.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+
+        if myHRP and hrp then
+            local dist = (myHRP.Position - hrp.Position).Magnitude
+            if numId == "119583605486352" and dist <= 11 then
+                performBlockInstant()
+            else
                 local maxReach = Settings.BoxSizeDepth + Settings.HitboxDistance + 3
-                local diff = myHRP.Position - hrp.Position
-                local distSq = (diff.X*diff.X)+(diff.Y*diff.Y)+(diff.Z*diff.Z)
-                if distSq <= (maxReach * maxReach) then
-                    local forwardOffset = - (Settings.BoxSizeDepth / 2) - Settings.HitboxDistance
-                    local boxCenter = hrp.CFrame * CFrame.new(0, 0, forwardOffset)
-                    local localPos = boxCenter:ToObjectSpace(myHRP.CFrame).Position
-                    local halfW = Settings.BoxSizeWidth / 2
-                    local halfH = Settings.BoxSizeHeight / 2
-                    local halfD = Settings.BoxSizeDepth / 2
-                    if math.abs(localPos.X) <= halfW and math.abs(localPos.Y) <= halfH and math.abs(localPos.Z) <= halfD then
-                        performBlock()
-                    end
+                if dist <= maxReach then
+                    performBlockInstant()
                 end
             end
         end
-
-        spawnHitboxAndCheck(character, cache.customConfig)
+        spawnHitboxAndCheck(character)
     end
 
-    sound.Played:Connect(onSoundTriggered)
+    sound.Played:Connect(onSoundEvent)
     sound:GetPropertyChangedSignal("Playing"):Connect(function()
-        if sound.IsPlaying then onSoundTriggered() end
+        if sound.IsPlaying then onSoundEvent() end
     end)
-    if sound.IsPlaying then onSoundTriggered() end
+    if sound.IsPlaying then onSoundEvent() end
 end
 
-local function initSoundDetection()
+task.spawn(function()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("Sound") then setupSound(obj) end
     end
     Workspace.DescendantAdded:Connect(function(obj)
         if obj:IsA("Sound") then setupSound(obj) end
     end)
-end
-initSoundDetection()
+end)
 
 -- ==========================================
 -- Stamina System
@@ -589,10 +816,8 @@ local function getMyRole()
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid and humanoid:FindFirstChild("BodyColors") then return "Survivor" end
     local charName = string.lower(character.Name)
-    if KillerNamesList then
-        for kName in pairs(KillerNamesList) do
-            if string.find(charName, kName) then return "Killer" end
-        end
+    for kName in pairs(KillerNamesList) do
+        if string.find(charName, kName) then return "Killer" end
     end
     return "Survivor"
 end
@@ -619,27 +844,28 @@ task.spawn(function()
         if SprintingModule then
             local role = getMyRole()
             local prefix = (role == "Survivor") and "Surv" or "Killer"
+
             if Settings[prefix .. "InfStamina"] then
                 SprintingModule.Stamina = SprintingModule.MaxStamina
             end
             if Settings[prefix .. "EnableMaxStamina"] and Settings[prefix .. "MaxStamina"] ~= nil then
                 SprintingModule.MaxStamina = Settings[prefix .. "MaxStamina"]
-            elseif not Settings[prefix .. "EnableMaxStamina"] and originalStaminaValues.MaxStamina ~= nil then
+            elseif not Settings[prefix .. "EnableMaxStamina"] and originalStaminaValues.MaxStamina then
                 SprintingModule.MaxStamina = originalStaminaValues.MaxStamina
             end
             if Settings[prefix .. "EnableStaminaGain"] and Settings[prefix .. "StaminaGain"] ~= nil then
                 SprintingModule.StaminaGain = Settings[prefix .. "StaminaGain"]
-            elseif not Settings[prefix .. "EnableStaminaGain"] and originalStaminaValues.StaminaGain ~= nil then
+            elseif not Settings[prefix .. "EnableStaminaGain"] and originalStaminaValues.StaminaGain then
                 SprintingModule.StaminaGain = originalStaminaValues.StaminaGain
             end
             if Settings[prefix .. "EnableStaminaLoss"] and Settings[prefix .. "StaminaLoss"] ~= nil then
                 SprintingModule.StaminaLoss = Settings[prefix .. "StaminaLoss"]
-            elseif not Settings[prefix .. "EnableStaminaLoss"] and originalStaminaValues.StaminaLoss ~= nil then
+            elseif not Settings[prefix .. "EnableStaminaLoss"] and originalStaminaValues.StaminaLoss then
                 SprintingModule.StaminaLoss = originalStaminaValues.StaminaLoss
             end
             if Settings[prefix .. "EnableSprintSpeed"] and Settings[prefix .. "SprintSpeed"] ~= nil then
                 SprintingModule.SprintSpeed = Settings[prefix .. "SprintSpeed"]
-            elseif not Settings[prefix .. "EnableSprintSpeed"] and originalStaminaValues.SprintSpeed ~= nil then
+            elseif not Settings[prefix .. "EnableSprintSpeed"] and originalStaminaValues.SprintSpeed then
                 SprintingModule.SprintSpeed = originalStaminaValues.SprintSpeed
             end
         end
@@ -647,12 +873,13 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- FlowGame Auto Gen Module
+-- Auto Gen (FlowGame)
 -- ==========================================
 local FlowGameModule, oldNew, hookedGen = nil, nil, false
 
 local function isNeighbour(r1, c1, r2, c2)
-    return (r2 == r1-1 and c2 == c1) or (r2 == r1+1 and c2 == c1) or (r2 == r1 and c2 == c1-1) or (r2 == r1 and c2 == c1+1)
+    return (r2 == r1-1 and c2 == c1) or (r2 == r1+1 and c2 == c1)
+        or (r2 == r1 and c2 == c1-1) or (r2 == r1 and c2 == c1+1)
 end
 
 local function key(n) return n.row .. "-" .. n.col end
@@ -720,7 +947,7 @@ local function hookAutoGen()
 end
 hookAutoGen()
 
-local function setupPuzzleUIHider()
+task.spawn(function()
     local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
     PlayerGui.ChildAdded:Connect(function(child)
         if child.Name == "PuzzleUI" then
@@ -738,18 +965,16 @@ local function setupPuzzleUIHider()
             if Settings.HidePuzzleUI and existingUI.Enabled then existingUI.Enabled = false end
         end)
     end
-end
-task.spawn(setupPuzzleUIHider)
+end)
 
 -- ==========================================
--- WINDUI
+-- WINDUI (NO CONFIG)
 -- ==========================================
 local Window = WindUI:CreateWindow({
     Title = "Fish Hub",
     Icon = "fish",
-    Author = "By Xuzi",
-    Folder = "FishHubWindUI",
-    Size = UDim2.fromOffset(560, 420),
+    Author = "By ᴹìɮì",
+    Size = UDim2.fromOffset(560, 440),
     Transparent = true,
     Theme = "Dark",
     SideBarWidth = 160,
@@ -757,27 +982,23 @@ local Window = WindUI:CreateWindow({
     ScrollBarEnabled = false,
 })
 
--- Tabs
-local InfoTab     = Window:Tab({ Title = "Info",          Icon = "info" })
-local AutoTab     = Window:Tab({ Title = "Auto Block",    Icon = "shield" })
-local HitboxTab   = Window:Tab({ Title = "Hitbox Block",  Icon = "box" })
-local StaminaTab  = Window:Tab({ Title = "Stamina",       Icon = "zap" })
-local AimbotTab   = Window:Tab({ Title = "Aimbot",        Icon = "crosshair" })
-local SolverTab   = Window:Tab({ Title = "Auto Solver",   Icon = "git-pull-request-closed" })
-local SettingsTab = Window:Tab({ Title = "Settings",      Icon = "settings" })
+local InfoTab     = Window:Tab({ Title = "Info",         Icon = "info" })
+local AutoTab     = Window:Tab({ Title = "Auto Block",   Icon = "shield" })
+local HitboxTab   = Window:Tab({ Title = "Hitbox Block", Icon = "box" })
+local ESPTab      = Window:Tab({ Title = "ESP",          Icon = "eye" })
+local StaminaTab  = Window:Tab({ Title = "Stamina",      Icon = "zap" })
+local AimbotTab   = Window:Tab({ Title = "Aimbot",       Icon = "crosshair" })
+local SolverTab   = Window:Tab({ Title = "Auto Solver",  Icon = "git-pull-request-closed" })
+local SettingsTab = Window:Tab({ Title = "Settings",     Icon = "settings" })
 
--- ==========================================
 -- Info Tab
--- ==========================================
 local InfoSection = InfoTab:Section({ Title = "About", Opened = true })
 InfoSection:Paragraph({
     Title = "Fish Hub",
-    Desc = "Developed by @By_ᴹìɮì\n🟢 Working well\n🔴 Errors, fixing\n🟡 Fair / Usable\n\nAuto Block 🟢 — All sound IDs included\nPunch Aimbot 🟢\nAuto Solver 🟢\nStamina Setting 🟢\nSave Config 🟢",
+    Desc = "🐟 Fish Hub — By_ᴹìɮì\n\nAuto Block 🟢\nHitbox Block 🟢\nESP 🟢\nStamina 🟢\nAimbot 🟢\nAuto Solver 🟢",
 })
 
--- ==========================================
 -- Auto Block Tab
--- ==========================================
 local ABSection = AutoTab:Section({ Title = "Main Controls", Opened = true })
 
 ABSection:Toggle({
@@ -799,16 +1020,15 @@ ABSection:Slider({
     Callback = function(v) Settings.BlockDelay = v end,
 })
 
-local ABAdv = AutoTab:Section({ Title = "Advanced Settings", Opened = true })
+local ABAdv = AutoTab:Section({ Title = "Advanced", Opened = true })
+
 ABAdv:Toggle({
     Title = "Ignore Behead Animation",
     Default = Settings.IgnoreBehead,
     Callback = function(v) Settings.IgnoreBehead = v end,
 })
 
--- ==========================================
 -- Hitbox Tab
--- ==========================================
 local HitSection = HitboxTab:Section({ Title = "Visuals", Opened = true })
 
 HitSection:Toggle({
@@ -832,24 +1052,28 @@ HitSection:Slider({
 })
 
 local DimSection = HitboxTab:Section({ Title = "Dimensions", Opened = true })
+
 DimSection:Slider({
     Title = "Hitbox Width",
-    Step = 1,
+    Step = 0.1,
     Value = { Min = 1, Max = 30, Default = Settings.BoxSizeWidth },
     Callback = function(v) Settings.BoxSizeWidth = v end,
 })
+
 DimSection:Slider({
     Title = "Hitbox Height",
-    Step = 1,
+    Step = 0.1,
     Value = { Min = 1, Max = 30, Default = Settings.BoxSizeHeight },
     Callback = function(v) Settings.BoxSizeHeight = v end,
 })
+
 DimSection:Slider({
     Title = "Hitbox Depth",
-    Step = 1,
+    Step = 0.1,
     Value = { Min = 1, Max = 30, Default = Settings.BoxSizeDepth },
     Callback = function(v) Settings.BoxSizeDepth = v end,
 })
+
 DimSection:Slider({
     Title = "Hitbox Distance Offset",
     Step = 0.01,
@@ -857,9 +1081,46 @@ DimSection:Slider({
     Callback = function(v) Settings.HitboxDistance = v end,
 })
 
--- ==========================================
+-- ESP Tab
+local ESPSection = ESPTab:Section({ Title = "ESP Categories", Opened = true })
+
+ESPSection:Toggle({
+    Title = "Killer ESP",
+    Default = Settings.EspKiller,
+    Callback = function(v) Settings.EspKiller = v; refreshAllESP() end,
+})
+
+ESPSection:Toggle({
+    Title = "Survivors ESP",
+    Default = Settings.EspSurvivors,
+    Callback = function(v) Settings.EspSurvivors = v; refreshAllESP() end,
+})
+
+ESPSection:Toggle({
+    Title = "Generators ESP",
+    Default = Settings.EspGenerators,
+    Callback = function(v) Settings.EspGenerators = v; refreshAllESP() end,
+})
+
+ESPSection:Toggle({
+    Title = "Bot/Minion ESP",
+    Default = Settings.EspBot,
+    Callback = function(v) Settings.EspBot = v; refreshAllESP() end,
+})
+
+ESPSection:Toggle({
+    Title = "Shadow ESP (John Doe)",
+    Default = Settings.EspShadow,
+    Callback = function(v) Settings.EspShadow = v; refreshAllESP() end,
+})
+
+ESPSection:Toggle({
+    Title = "Items ESP",
+    Default = Settings.EspItems,
+    Callback = function(v) Settings.EspItems = v; refreshAllESP() end,
+})
+
 -- Stamina Tab
--- ==========================================
 local SurvSection = StaminaTab:Section({ Title = "Survivor", Opened = true })
 
 SurvSection:Toggle({
@@ -867,44 +1128,52 @@ SurvSection:Toggle({
     Default = Settings.SurvInfStamina,
     Callback = function(v) Settings.SurvInfStamina = v end,
 })
+
 SurvSection:Toggle({
     Title = "Enable Custom Max Stamina",
     Default = Settings.SurvEnableMaxStamina,
     Callback = function(v) Settings.SurvEnableMaxStamina = v end,
 })
+
 SurvSection:Slider({
     Title = "Max Stamina Value",
     Step = 10,
     Value = { Min = 10, Max = 500, Default = Settings.SurvMaxStamina },
     Callback = function(v) Settings.SurvMaxStamina = v end,
 })
+
 SurvSection:Toggle({
     Title = "Enable Custom Stamina Gain",
     Default = Settings.SurvEnableStaminaGain,
     Callback = function(v) Settings.SurvEnableStaminaGain = v end,
 })
+
 SurvSection:Slider({
     Title = "Stamina Gain Value",
     Step = 1,
     Value = { Min = 1, Max = 100, Default = Settings.SurvStaminaGain },
     Callback = function(v) Settings.SurvStaminaGain = v end,
 })
+
 SurvSection:Toggle({
     Title = "Enable Custom Stamina Loss",
     Default = Settings.SurvEnableStaminaLoss,
     Callback = function(v) Settings.SurvEnableStaminaLoss = v end,
 })
+
 SurvSection:Slider({
     Title = "Stamina Loss Value",
     Step = 1,
     Value = { Min = 0, Max = 50, Default = Settings.SurvStaminaLoss },
     Callback = function(v) Settings.SurvStaminaLoss = v end,
 })
+
 SurvSection:Toggle({
     Title = "Enable Custom Sprint Speed",
     Default = Settings.SurvEnableSprintSpeed,
     Callback = function(v) Settings.SurvEnableSprintSpeed = v end,
 })
+
 SurvSection:Slider({
     Title = "Sprint Speed Value",
     Step = 1,
@@ -913,49 +1182,58 @@ SurvSection:Slider({
 })
 
 local KillSection = StaminaTab:Section({ Title = "Killer", Opened = true })
+
 KillSection:Toggle({
     Title = "Infinite Stamina",
     Default = Settings.KillerInfStamina,
     Callback = function(v) Settings.KillerInfStamina = v end,
 })
+
 KillSection:Toggle({
     Title = "Enable Custom Max Stamina",
     Default = Settings.KillerEnableMaxStamina,
     Callback = function(v) Settings.KillerEnableMaxStamina = v end,
 })
+
 KillSection:Slider({
     Title = "Max Stamina Value",
     Step = 10,
     Value = { Min = 10, Max = 500, Default = Settings.KillerMaxStamina },
     Callback = function(v) Settings.KillerMaxStamina = v end,
 })
+
 KillSection:Toggle({
     Title = "Enable Custom Stamina Gain",
     Default = Settings.KillerEnableStaminaGain,
     Callback = function(v) Settings.KillerEnableStaminaGain = v end,
 })
+
 KillSection:Slider({
     Title = "Stamina Gain Value",
     Step = 1,
     Value = { Min = 1, Max = 100, Default = Settings.KillerStaminaGain },
     Callback = function(v) Settings.KillerStaminaGain = v end,
 })
+
 KillSection:Toggle({
     Title = "Enable Custom Stamina Loss",
     Default = Settings.KillerEnableStaminaLoss,
     Callback = function(v) Settings.KillerEnableStaminaLoss = v end,
 })
+
 KillSection:Slider({
     Title = "Stamina Loss Value",
-    Step = 1,
+    Step = 0.5,
     Value = { Min = 0, Max = 50, Default = Settings.KillerStaminaLoss },
     Callback = function(v) Settings.KillerStaminaLoss = v end,
 })
+
 KillSection:Toggle({
     Title = "Enable Custom Sprint Speed",
     Default = Settings.KillerEnableSprintSpeed,
     Callback = function(v) Settings.KillerEnableSprintSpeed = v end,
 })
+
 KillSection:Slider({
     Title = "Sprint Speed Value",
     Step = 1,
@@ -963,9 +1241,7 @@ KillSection:Slider({
     Callback = function(v) Settings.KillerSprintSpeed = v end,
 })
 
--- ==========================================
 -- Aimbot Tab
--- ==========================================
 local AimSection = AimbotTab:Section({ Title = "Manual Aimbot", Opened = true })
 
 AimSection:Toggle({
@@ -1002,9 +1278,7 @@ AimSection:Slider({
     Callback = function(v) Settings.AimbotDuration = v end,
 })
 
--- ==========================================
 -- Auto Solver Tab
--- ==========================================
 local SolverSection = SolverTab:Section({ Title = "Minigame Hacks", Opened = true })
 
 SolverSection:Toggle({
@@ -1032,9 +1306,7 @@ SolverSection:Toggle({
     end,
 })
 
--- ==========================================
 -- Settings Tab
--- ==========================================
 local SetSection = SettingsTab:Section({ Title = "UI", Opened = true })
 
 SetSection:Button({
@@ -1042,185 +1314,6 @@ SetSection:Button({
     Callback = function() Window:Destroy() end,
 })
 
-SetSection:Button({
-    Title = "FPS Display (TOP LEFT CORNER + DRAGGABLE GUI)",
-    Desc = "Click to run the FPS counter script",
-    Callback = function()
-        local success, err = pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/DrByteTF/Universal-Script/refs/heads/main/DisplayFps"))()
-        end)
-        if success then
-            print("[Loader] FPS script executed successfully.")
-        else
-            warn("[Loader] Failed to execute FPS script: " .. tostring(err))
-        end
-    end,
-})
+SetSection:Button({ Title = "FPS Display (TOP LEFT CORNER + DRAGGABLE GUI)", Desc = "Click to run the FPS counter script", Callback = function() local success, err = pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/DrByteTF/Universal-Script/refs/heads/main/DisplayFps"))() end) if success then print("[Loader] FPS script executed successfully.") else warn("[Loader] Failed to execute FPS script: " .. tostring(err)) end end, })
 
--- ==========================================
--- Config Save/Load System
--- ==========================================
-local CONFIG_FOLDER = "FishHub_Configs"
-local selectedConfig = nil
-
--- Ensure folder exists
-if makefolder and not isfolder(CONFIG_FOLDER) then
-    pcall(function() makefolder(CONFIG_FOLDER) end)
-end
-
--- Function: save current settings to a file
-local function saveConfig(name)
-    if not name or name == "" then return false, "No name given" end
-    local safeName = name:gsub("[^%w_%-]", "_")  -- strip weird chars
-    local data = {}
-    for k, v in pairs(Settings) do
-        if type(v) ~= "table" and type(v) ~= "userdata" then
-            data[k] = v
-        end
-    end
-    local ok, err = pcall(function()
-        writefile(CONFIG_FOLDER .. "/" .. safeName .. ".json", HttpService:JSONEncode(data))
-    end)
-    return ok, err
-end
-
--- Function: load settings from a file
-local function loadConfig(name)
-    if not name or name == "" then return false, "No name given" end
-    local safeName = name:gsub("[^%w_%-]", "_")
-    local path = CONFIG_FOLDER .. "/" .. safeName .. ".json"
-    if not isfile(path) then return false, "Config not found" end
-    local ok, result = pcall(function()
-        return HttpService:JSONDecode(readfile(path))
-    end)
-    if not ok or type(result) ~= "table" then return false, "Invalid config" end
-    for k, v in pairs(result) do
-        if Settings[k] ~= nil then
-            Settings[k] = v
-        end
-    end
-    return true
-end
-
--- Function: delete a config
-local function deleteConfig(name)
-    if not name or name == "" then return false end
-    local safeName = name:gsub("[^%w_%-]", "_")
-    local path = CONFIG_FOLDER .. "/" .. safeName .. ".json"
-    if isfile(path) then
-        pcall(function() delfile(path) end)
-        return true
-    end
-    return false
-end
-
--- Function: list all saved configs
-local function listConfigs()
-    local list = {}
-    if not listfiles then return list end
-    local ok, files = pcall(function() return listfiles(CONFIG_FOLDER) end)
-    if not ok or not files then return list end
-    for _, file in ipairs(files) do
-        local name = file:match("([^/\\]+)%.json$")
-        if name then table.insert(list, name) end
-    end
-    return list
-end
-
--- Config Section UI
-local ConfigSection = SettingsTab:Section({ Title = "Config Manager", Opened = true })
-
--- Config name input
-local configNameInput = ""
-ConfigSection:Input({
-    Title = "Config Name",
-    Desc = "Enter a name to save current settings",
-    Placeholder = "My Config",
-    Value = "",
-    Callback = function(text)
-        configNameInput = text
-    end,
-})
-
--- Save button
-ConfigSection:Button({
-    Title = "💾 Save Current Settings",
-    Desc = "Saves all current settings to a config file",
-    Callback = function()
-        if configNameInput == "" then
-            print("[Config] Please enter a config name first!")
-            return
-        end
-        local ok, err = saveConfig(configNameInput)
-        if ok then
-            print("[Config] Saved: " .. configNameInput)
-        else
-            warn("[Config] Save failed: " .. tostring(err))
-        end
-    end,
-})
-
--- Dropdown to select config
-local configDropdown
-configDropdown = ConfigSection:Dropdown({
-    Title = "Select Config",
-    Desc = "Pick a saved config to load or delete",
-    Values = listConfigs(),
-    Value = nil,
-    Multi = false,
-    Callback = function(selected)
-        selectedConfig = selected
-    end,
-})
-
--- Load button
-ConfigSection:Button({
-    Title = "📂 Load Selected Config",
-    Desc = "Applies the settings from the selected config",
-    Callback = function()
-        if not selectedConfig or selectedConfig == "" then
-            print("[Config] Please select a config from the dropdown first!")
-            return
-        end
-        local ok, err = loadConfig(selectedConfig)
-        if ok then
-            print("[Config] Loaded: " .. selectedConfig .. " — rejoin or re-open UI to apply")
-        else
-            warn("[Config] Load failed: " .. tostring(err))
-        end
-    end,
-})
-
--- Delete button
-ConfigSection:Button({
-    Title = "🗑️ Delete Selected Config",
-    Desc = "Permanently removes the selected config file",
-    Callback = function()
-        if not selectedConfig or selectedConfig == "" then
-            print("[Config] Please select a config first!")
-            return
-        end
-        local ok = deleteConfig(selectedConfig)
-        if ok then
-            print("[Config] Deleted: " .. selectedConfig)
-            selectedConfig = nil
-        else
-            warn("[Config] Delete failed")
-        end
-    end,
-})
-
--- Refresh dropdown button
-ConfigSection:Button({
-    Title = "🔄 Refresh Config List",
-    Desc = "Updates the dropdown with the latest saved configs",
-    Callback = function()
-        local updated = listConfigs()
-        pcall(function()
-            configDropdown:Refresh(updated, true)
-        end)
-        print("[Config] List refreshed. Found " .. #updated .. " config(s).")
-    end,
-})
-
-print("Fish Hub (WindUI) loaded.")
+print("🐟 Fish Hub loaded. Click the floating icon to open.")
